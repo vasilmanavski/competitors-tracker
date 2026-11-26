@@ -52,7 +52,8 @@ Every setting is an env var, validated at startup. For Docker, put overrides in 
 | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | mock | Any OpenAI Chat Completions endpoint |
 | `LLM_DAILY_CAP` | `2000` | Hard cap on LLM calls per UTC day |
 | `LLM_TIMEOUT_MS` | `10000` | Per LLM call |
-| `SCHEDULER_ENABLED` | `true` | `false` runs the API without polling and summaries |
+| `SNAPSHOT_RETENTION_DAYS` | `90` | Uneventful polls older than this are purged; changes are kept (see below) |
+| `SCHEDULER_ENABLED` | `true` | `false` runs the API without background work (polling, summaries, retention) |
 
 ### Point it at a different listing source
 ```bash
@@ -124,6 +125,7 @@ Full reasoning per epic: [`docs/epics/`](docs/epics).
 
 **How history is stored**
 - **Every poll is a row** (`snapshots`), including no-change, incomplete, 404 and failed polls, because the brief requires them visible for 90 days. Change detection and the insert run in **one transaction** with the competitor row locked. The list view reads denormalised `last_*` columns on `competitors`, so it never scans snapshots. Deleting a competitor deletes its history. *Considered:* storing only changes (fails the 90-day requirement) and soft delete.
+- **Retention: keep the changes, expire the noise.** An hourly job (also run at startup) deletes *uneventful* snapshots (no change, incomplete, failed, still not listed) older than `SNAPSHOT_RETENTION_DAYS` (90), in batches of 5,000. Changes and each competitor's first snapshot are kept for good: they're a tiny fraction of the rows and the history a product manager comes back for ("when did they drop their price?"). Each competitor's **latest complete listing is never deleted, however old**, because the next poll is compared with it. Otherwise a competitor delisted for 100 days would come back as a "first snapshot" instead of "back on the source, price dropped". *Considered:* deleting everything older than 90 days (loses the change history and can break change detection), and keeping everything (unbounded growth).
 
 **The LLM and the cap**
 - **A poll never waits for the LLM.** The snapshot is committed first; a separate **summary worker** (same `SKIP LOCKED` pattern, newest change first, 120 s lease) does the call. A slow or failing LLM can't lose or delay a poll result.
@@ -164,9 +166,10 @@ If each of 6,000 competitors changes once a week, that's ~860 changes/day and it
   - **It can't be shown with the provided mock**, which only echoes the first 160 characters of the prompt and could never return a per-item answer, so every batch would come back unusable.
 
 **3. History: ~52 million rows.**
-6,000 × 96 polls/day × 90 days = **51.8M rows**. Most are "no change" rows carrying a full copy of the listing text: tens of GB with indexes. What I'd do:
-- **Store content only when it changes.** No-change rows keep the status and time only (or a run as a single `first_at / last_at / count` row, which is how the UI already shows them).
-- **Partition `snapshots` by month** on `fetched_at` and drop partitions older than 90 days: retention by `DROP`, not slow `DELETE`s.
+6,000 × 96 polls/day × 90 days = **51.8M rows**. Most are "no change" rows carrying a full copy of the listing text: tens of GB with indexes.
+- **Built: retention.** Uneventful rows older than 90 days are purged hourly in batches, using a partial index on exactly those rows, so the table stays at about 90 days of polls plus the changes, instead of growing forever.
+- **Next: partition `snapshots` by month** on `fetched_at`. At this volume, batched `DELETE`s mean steady vacuum work; with partitions the uneventful history of a whole month goes with one instant `DROP`. Changes would be copied to a small `snapshot_changes` table first, so dropping a partition never loses them.
+- **Next: store content only when it changes.** No-change rows would keep the status and time only (or one `first_at / last_at / count` row per run, which is how the UI already shows them).
 - Reads are already bounded: the timeline is paginated, and the list reads one row per competitor.
 
 **4. Running more than one instance.**
@@ -176,7 +179,7 @@ Claiming is already safe across instances (`SKIP LOCKED`), and so is the LLM cap
 
 ## Left out on purpose
 - **Auth:** the brief assumes one internal user.
-- **The scaling measures above** (tiers, partitioning, shared limiter, coalescing): described, not built.
+- **The scaling measures above** (tiers, partitioning, shared limiter, coalescing, batching): described, not built. Retention *is* built.
 - **Cloud deployment** (bonus): skipped to keep the time reasonable.
 - **Fine-tuning a model:** no budget, not possible on the mock, and the problem is prompting, not model knowledge.
 - **Notifications** (email/Slack on change) and **soft delete**.

@@ -101,6 +101,9 @@ export const snapshots = pgTable(
     index("snapshots_last_ok_idx")
       .on(t.competitorId, t.fetchedAt.desc())
       .where(sql`${t.status} = 'ok'`),
+    index("snapshots_uneventful_fetched_idx")
+      .on(t.fetchedAt)
+      .where(sql`not ${t.changed} and ${t.summaryStatus} <> 'first_snapshot'`),
     index("snapshots_summary_due_idx")
       .on(t.summaryNextAttemptAt)
       .where(sql`${t.summaryNextAttemptAt} is not null`),
