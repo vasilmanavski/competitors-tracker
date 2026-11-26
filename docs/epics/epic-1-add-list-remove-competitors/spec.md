@@ -73,6 +73,8 @@ curl -X DELETE localhost:<api>/api/competitors/acme-crm   # 204
 ```
 Plus the same flow manually in the UI.
 
+**Docker: deferred (DECIDED 2026-11-26).** Epics 1–3 are built and verified locally only (`npm run dev:all`, native Postgres). `docker compose up` is checked once, on the personal laptop, as part of the final Docker check in Epic 4. Epic 1 is done without it.
+
 ## Decision log → README
 - Unknown-id policy (1.2) and why.
 - Hard delete vs soft delete (1.1).

@@ -38,9 +38,20 @@ A README that meets every deliverable in the brief and answers "these numbers do
 | 4.2 | Production-scale measures are **described, not built** (partitioning, adaptive polling, multi-worker). | **PROPOSED** |
 | 4.3 | Cloud deployment (bonus): only if time remains. | **OPEN** |
 
+## Final Docker check (deferred from Epics 1–3)
+Epics 1–3 are verified locally only (dev laptop has no Docker). Before submitting, on the personal laptop:
+- [ ] `docker compose up --build` on a fresh clone → all 5 services healthy
+- [ ] The API container applies every migration (`0000_init` … latest) on startup
+- [ ] Web on `:8080`: add / list / remove a competitor through nginx (POST and DELETE proxied, not just GET)
+- [ ] The scheduler in the container reaches `listing-source` by its service hostname (Epic 2)
+- [ ] The API reaches `mock-llm` by its service hostname (Epic 3)
+- [ ] Postgres 17 (compose) vs 14 (local): migrations and queries behave the same
+- [ ] Each epic's curl verification passes against the compose stack
+
 ## Stories
 _To be derived when this epic starts._
 
 ## Verification
 - A fresh clone + following the README only → the system runs.
+- The final Docker check above is fully ticked.
 - Every checkbox above is ticked.
