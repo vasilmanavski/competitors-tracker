@@ -1,57 +1,23 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { CompetitorId } from "../competitors/competitor-id.ts";
-import type { CompetitorRepository } from "../competitors/repository.ts";
-import { formatPrice } from "../listings/normalize.ts";
-import { priceOf, type Snapshot, type SnapshotRepository } from "./repository.ts";
+import { toSnapshotDto } from "./dto.ts";
+import type { SnapshotService } from "./service.ts";
 
-const Query = z.object({
-  limit: z.coerce.number().int().min(1).max(500).default(100),
+const DEFAULT_PAGE_SIZE = 100;
+const MAX_PAGE_SIZE = 500;
+
+const TimelineQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   before: z.iso.datetime({ offset: true }).optional(),
 });
 
-// `price` is a canonical display string when we understood the price ("$39/mo"),
-// otherwise the source's own (cleaned) wording. The parsed parts are in priceDetail.
-export const toSnapshotDto = (s: Snapshot) => {
-  const price = priceOf(s);
-  return {
-    id: s.id,
-    fetchedAt: s.fetchedAt.toISOString(),
-    status: s.status,
-    title: s.title,
-    tagline: s.tagline,
-    price: price ? formatPrice(price) : s.priceText,
-    priceDetail: price,
-    priceRaw: s.priceText,
-    description: s.description,
-    changed: s.changed,
-    changedFields: s.changedFields,
-    missingFields: s.missingFields,
-    summary: s.summary,
-    summaryStatus: s.summaryStatus,
-    error: s.error,
-  };
-};
-
-export function snapshotRoutes(app: FastifyInstance, snapshots: SnapshotRepository, competitors: CompetitorRepository) {
-  app.get<{ Params: { id: string }; Querystring: unknown }>(
-    "/api/competitors/:id/snapshots",
-    async (request, reply) => {
-      const id = CompetitorId.safeParse(request.params.id);
-      if (!id.success) return reply.code(400).send({ message: id.error.issues[0]?.message ?? "invalid id" });
-      const query = Query.safeParse(request.query);
-      if (!query.success) {
-        return reply.code(400).send({ message: query.error.issues[0]?.message ?? "invalid query" });
-      }
-      // 404 for an untracked id, so the UI can tell "removed" from "no polls yet" ([]).
-      if (!(await competitors.exists(id.data))) {
-        return reply.code(404).send({ message: `${id.data} is not tracked` });
-      }
-      const rows = await snapshots.list(id.data, {
-        limit: query.data.limit,
-        before: query.data.before ? new Date(query.data.before) : undefined,
-      });
-      return rows.map(toSnapshotDto);
-    },
-  );
+/** `GET /api/competitors/:id/snapshots?limit=&before=` (newest first). */
+export function registerSnapshotRoutes(app: FastifyInstance, snapshotService: SnapshotService): void {
+  app.get<{ Params: { id: string }; Querystring: unknown }>("/api/competitors/:id/snapshots", async (request) => {
+    const id = CompetitorId.parse(request.params.id);
+    const { limit, before } = TimelineQuery.parse(request.query);
+    const rows = await snapshotService.listTimeline(id, { limit, before: before ? new Date(before) : undefined });
+    return rows.map(toSnapshotDto);
+  });
 }

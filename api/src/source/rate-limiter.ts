@@ -1,20 +1,14 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-// Decision 2.7: ONE limiter for every request to the source, because the
-// source's limit is global across all ids. It is a token bucket with capacity 1:
-// requests start at least 1000/rate ms apart and never burst. A larger bucket
-// would get more done after idle periods, but bursts are exactly what trips
-// the source's own bucket.
-//
-// Decision 2.8: on a 429, pauseFor(Retry-After) holds back *every* caller, not
-// just the one that got the 429. Callers that already had a slot inside the
-// pause re-check after waking and queue again.
-
+/** Paces every request to the source, because the source's rate limit is global across ids. */
 export type RateLimiter = {
+  /** Resolves when the caller may send one request. */
   acquire(signal?: AbortSignal): Promise<void>;
+  /** Holds back every caller for `ms`, e.g. for a 429's Retry-After. */
   pauseFor(ms: number): void;
 };
 
+/** Time source, replaceable in tests. */
 export type Clock = {
   now(): number;
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
@@ -25,17 +19,21 @@ const realClock: Clock = {
   sleep: (ms, signal) => sleep(ms, undefined, { signal }),
 };
 
+/**
+ * A token bucket with capacity 1: requests start at least `1000 / rate` ms apart and
+ * never burst, since bursts are what trip the source's own limiter. Slots are reserved
+ * synchronously, so concurrent callers are served in order.
+ */
 export function createRateLimiter(ratePerSecond: number, clock: Clock = realClock): RateLimiter {
   if (!(ratePerSecond > 0)) throw new Error("ratePerSecond must be > 0");
   const spacingMs = 1000 / ratePerSecond;
-  let nextSlotAt = 0; // earliest start time of the next request
+  let nextSlotAt = 0;
   let pausedUntil = 0;
 
   return {
     async acquire(signal) {
       for (;;) {
         signal?.throwIfAborted();
-        // Reserve the slot synchronously, so concurrent callers queue in order.
         const now = clock.now();
         const slot = Math.max(now, nextSlotAt, pausedUntil);
         nextSlotAt = slot + spacingMs;

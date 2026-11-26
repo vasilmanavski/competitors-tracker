@@ -1,41 +1,51 @@
-import { loadConfig } from "./config.ts";
-import { createDb, runMigrations, waitForDb } from "./db/client.ts";
 import { buildApp } from "./app.ts";
-import { createPoller } from "./polling/poller.ts";
-import { createScheduler } from "./polling/scheduler.ts";
-import { snapshotRepository } from "./snapshots/repository.ts";
+import { type Config, loadConfig } from "./config.ts";
+import { createDb, runMigrations, waitForDb } from "./db/client.ts";
+import { createPollingService, type PollLogger } from "./polling/service.ts";
+import { createScheduler, type Scheduler, type SchedulerLogger } from "./polling/scheduler.ts";
+import { createServices, type Services } from "./services.ts";
 import { createRateLimiter } from "./source/rate-limiter.ts";
 import { createSourceClient } from "./source/source-client.ts";
 
-async function main() {
-  const config = loadConfig();
-  const { pool, db } = createDb(config.DATABASE_URL);
+/**
+ * Enough concurrent polls to keep the rate limiter busy while responses are slow
+ * (rate × timeout), but bounded so one tick never claims the whole backlog.
+ */
+function maxPollsInFlight(config: Config): number {
+  return Math.max(1, Math.ceil(config.SOURCE_RATE_LIMIT_PER_SECOND * (config.SOURCE_TIMEOUT_MS / 1000)));
+}
 
-  await waitForDb(pool);
-  await runMigrations(db);
-  console.log("Migrations applied");
-
-  const app = buildApp({ db });
-
-  // Polling runs in the API process: one global limiter for every request to
-  // the source (decision 2.7). Epic 4 describes splitting it out at scale.
-  const limiter = createRateLimiter(config.SOURCE_RATE_LIMIT_PER_SECOND);
+function createPollingScheduler(config: Config, services: Services, log: PollLogger & SchedulerLogger): Scheduler {
   const source = createSourceClient({
     baseUrl: config.SOURCE_BASE_URL,
-    limiter,
+    limiter: createRateLimiter(config.SOURCE_RATE_LIMIT_PER_SECOND),
     timeoutMs: config.SOURCE_TIMEOUT_MS,
     maxRetries: config.SOURCE_MAX_RETRIES,
   });
-  const log = app.log.child({ component: "poller" });
-  const scheduler = createScheduler({
-    snapshots: snapshotRepository(db),
-    poll: createPoller({ source, snapshots: snapshotRepository(db), log }),
+  const polling = createPollingService({
+    source,
+    snapshotService: services.snapshotService,
+    competitorRepository: services.data.repositories.competitorRepository,
     intervalSeconds: config.POLL_INTERVAL_SECONDS,
-    // Enough concurrency to keep the limiter busy through slow responses
-    // (rate × timeout), but bounded so we never claim the whole backlog.
-    maxInFlight: Math.max(1, Math.ceil(config.SOURCE_RATE_LIMIT_PER_SECOND * (config.SOURCE_TIMEOUT_MS / 1000))),
     log,
   });
+  return createScheduler({
+    claimDue: polling.claimDue,
+    poll: polling.pollCompetitor,
+    maxInFlight: maxPollsInFlight(config),
+    log,
+  });
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const { pool, db } = createDb(config.DATABASE_URL);
+  await waitForDb(pool);
+  await runMigrations(db);
+
+  const services = createServices(db);
+  const app = buildApp(services);
+  const scheduler = createPollingScheduler(config, services, app.log.child({ component: "poller" }));
 
   const shutdown = async (signal: string) => {
     app.log.info(`${signal} received, shutting down`);
@@ -49,15 +59,15 @@ async function main() {
 
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 
-  if (config.SCHEDULER_ENABLED) {
-    scheduler.start();
-    app.log.info(
-      { source: config.SOURCE_BASE_URL, intervalSeconds: config.POLL_INTERVAL_SECONDS, ratePerSecond: config.SOURCE_RATE_LIMIT_PER_SECOND },
-      "scheduler started",
-    );
-  } else {
+  if (!config.SCHEDULER_ENABLED) {
     app.log.warn("SCHEDULER_ENABLED=false: not polling the source");
+    return;
   }
+  scheduler.start();
+  app.log.info(
+    { source: config.SOURCE_BASE_URL, intervalSeconds: config.POLL_INTERVAL_SECONDS, ratePerSecond: config.SOURCE_RATE_LIMIT_PER_SECOND },
+    "scheduler started",
+  );
 }
 
 main().catch((err: unknown) => {
