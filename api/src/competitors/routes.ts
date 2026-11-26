@@ -6,12 +6,27 @@ import type { Competitor, CompetitorRepository } from "./repository.ts";
 // Error bodies are always { message }, so the UI can show them inline as-is.
 const firstIssue = (error: z.ZodError) => error.issues[0]?.message ?? "invalid request";
 
-const toDto = (c: Competitor) => ({ id: c.id, createdAt: c.createdAt.toISOString() });
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The list row carries a small status summary, read from the denormalised
+// columns that each poll updates (no snapshot scan per row).
+const toDto = (c: Competitor, now = Date.now()) => ({
+  id: c.id,
+  createdAt: c.createdAt.toISOString(),
+  lastPolledAt: c.lastPolledAt?.toISOString() ?? null,
+  lastStatus: c.lastStatus,
+  lastChangedAt: c.lastChangedAt?.toISOString() ?? null,
+  changedLast24h: c.lastChangedAt !== null && now - c.lastChangedAt.getTime() < DAY_MS,
+  listingState: c.listingState,
+  // Follow-up to decision 1.2: every confirmed answer so far was a 404 (typo?).
+  neverFound: c.listingState === "never_listed",
+});
 
 export function competitorRoutes(app: FastifyInstance, repo: CompetitorRepository) {
   app.get("/api/competitors", async () => {
     const rows = await repo.list();
-    return rows.map(toDto);
+    const now = Date.now();
+    return rows.map((c) => toDto(c, now));
   });
 
   // Decision 1.2: we don't check the id against the source here. An unknown id

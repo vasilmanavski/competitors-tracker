@@ -2,12 +2,17 @@ import { asc, eq } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { competitors } from "../db/schema.ts";
 
-export type Competitor = { id: string; createdAt: Date };
+export type Competitor = typeof competitors.$inferSelect;
 
 export function competitorRepository(db: Db) {
   return {
     list(): Promise<Competitor[]> {
       return db.select().from(competitors).orderBy(asc(competitors.createdAt), asc(competitors.id));
+    },
+
+    async exists(id: string): Promise<boolean> {
+      const rows = await db.select({ id: competitors.id }).from(competitors).where(eq(competitors.id, id));
+      return rows.length > 0;
     },
 
     // Returns null when the id is already tracked. ON CONFLICT DO NOTHING keeps

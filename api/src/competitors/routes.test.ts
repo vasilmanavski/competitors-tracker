@@ -18,7 +18,7 @@ before(async () => {
   await runMigrations(db);
 });
 beforeEach(async () => {
-  await db.execute(sql`truncate competitors`);
+  await db.execute(sql`truncate competitors cascade`);
 });
 after(async () => {
   await app.close();

@@ -3,6 +3,8 @@ import type { Db } from "./db/client.ts";
 import { sql } from "drizzle-orm";
 import { competitorRepository } from "./competitors/repository.ts";
 import { competitorRoutes } from "./competitors/routes.ts";
+import { snapshotRepository } from "./snapshots/repository.ts";
+import { snapshotRoutes } from "./snapshots/routes.ts";
 
 // Builds the HTTP app without starting it, so tests can call app.inject().
 export function buildApp(deps: { db: Db }, options: { logger?: boolean } = {}) {
@@ -22,7 +24,9 @@ export function buildApp(deps: { db: Db }, options: { logger?: boolean } = {}) {
     });
   }
 
-  competitorRoutes(app, competitorRepository(deps.db));
+  const competitors = competitorRepository(deps.db);
+  competitorRoutes(app, competitors);
+  snapshotRoutes(app, snapshotRepository(deps.db), competitors);
 
   return app;
 }

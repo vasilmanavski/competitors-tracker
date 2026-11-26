@@ -9,7 +9,13 @@ const ConfigSchema = z.object({
   // Listing source. Graders point this at their own instance.
   SOURCE_BASE_URL: z.url(),
   POLL_INTERVAL_SECONDS: z.coerce.number().int().positive().default(900),
-  SOURCE_RATE_LIMIT_PER_SECOND: z.coerce.number().positive().default(5),
+  // Our own pace for ALL source requests. Default 4: headroom under the
+  // source's 5/s, so clock drift and retries don't tip us into 429s.
+  SOURCE_RATE_LIMIT_PER_SECOND: z.coerce.number().positive().default(4),
+  SOURCE_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  SOURCE_MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
+  // Set to false to run the API without polling (e.g. a read-only replica).
+  SCHEDULER_ENABLED: z.stringbool().default(true),
 
   // LLM (OpenAI Chat Completions shape). Used from Epic 3.
   LLM_BASE_URL: z.url(),

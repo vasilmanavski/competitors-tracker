@@ -1,12 +1,30 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { addCompetitor, listCompetitors, removeCompetitor, type Competitor } from "./api.ts";
+import { absoluteTime, errorMessage, relativeTime } from "./format.ts";
+
+// Polls land in the background, so the list re-fetches on a timer too.
+const REFRESH_MS = 15_000;
+
+const STATUS_LABEL: Record<NonNullable<Competitor["lastStatus"]>, string> = {
+  ok: "ok",
+  partial: "incomplete listing",
+  not_found: "not listed at source",
+  fetch_failed: "fetch failed",
+};
+
+function PollStatus({ c }: { c: Competitor }) {
+  if (!c.lastPolledAt || !c.lastStatus) return <span style={{ color: "gray" }}>not polled yet</span>;
+  return (
+    <span style={{ color: "gray" }} title={absoluteTime(c.lastPolledAt)}>
+      last poll {relativeTime(c.lastPolledAt)}: {STATUS_LABEL[c.lastStatus]}
+    </span>
+  );
+}
 
 type ListState =
   | { state: "loading" }
   | { state: "ready"; competitors: Competitor[] }
   | { state: "error"; message: string };
-
-const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 // The server is the source of truth: after every add/remove we re-fetch the
 // list rather than patching local state, so the UI can't drift from the DB.
@@ -29,7 +47,11 @@ export function CompetitorList() {
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
-    return () => controller.abort();
+    const timer = setInterval(() => void refresh(controller.signal), REFRESH_MS);
+    return () => {
+      clearInterval(timer);
+      controller.abort();
+    };
   }, [refresh]);
 
   async function onAdd(event: FormEvent) {
@@ -95,8 +117,21 @@ export function CompetitorList() {
       {list.state === "ready" && list.competitors.length > 0 && (
         <ul>
           {list.competitors.map((c) => (
-            <li key={c.id}>
-              <code>{c.id}</code>{" "}
+            <li key={c.id} style={{ marginBottom: "0.4rem" }}>
+              <a href={`#/competitors/${encodeURIComponent(c.id)}`}>
+                <code>{c.id}</code>
+              </a>{" "}
+              {c.changedLast24h && (
+                <strong style={{ color: "darkorange" }} title={c.lastChangedAt ? absoluteTime(c.lastChangedAt) : undefined}>
+                  ● changed in last 24 h
+                </strong>
+              )}{" "}
+              {c.neverFound && (
+                <strong style={{ color: "crimson" }} title="Every answer from the source so far was 404. Check the id for a typo.">
+                  ⚠ never found at source
+                </strong>
+              )}{" "}
+              <PollStatus c={c} />{" "}
               <button onClick={() => void onRemove(c.id)} aria-label={`Remove ${c.id}`}>
                 Remove
               </button>

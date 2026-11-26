@@ -65,7 +65,9 @@ services:
       DATABASE_URL: postgres://competitorpulse:competitorpulse@postgres:5432/competitorpulse
       SOURCE_BASE_URL: ${SOURCE_BASE_URL:-http://listing-source:4002}
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-900}
-      SOURCE_RATE_LIMIT_PER_SECOND: ${SOURCE_RATE_LIMIT_PER_SECOND:-5}
+      SOURCE_RATE_LIMIT_PER_SECOND: ${SOURCE_RATE_LIMIT_PER_SECOND:-4}
+      SOURCE_TIMEOUT_MS: ${SOURCE_TIMEOUT_MS:-5000}
+      SOURCE_MAX_RETRIES: ${SOURCE_MAX_RETRIES:-2}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://mock-llm:4001/v1}
       LLM_API_KEY: ${LLM_API_KEY:-not-needed-for-mock}
       LLM_MODEL: ${LLM_MODEL:-mock-model}
