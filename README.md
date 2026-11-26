@@ -154,10 +154,26 @@ The brief: 6,000 competitors every 15 min, a 5 req/s source, 2,000 LLM calls/day
 - **New competitors first:** when behind, a newly added competitor currently queues behind overdue ones. Defaulting its `next_poll_at` to the past is a one-line fix (not built).
 
 **2. 2,000 LLM calls/day can't cover every change.**
-If each of 6,000 competitors changes once a week, that's ~860 changes/day and it fits. Once a day each, it's 6,000 and it doesn't. Already built: the LLM only runs on changes that matter, structured changes never use it, and overflow is deferred to the next day with the old → new values still shown. Next, in this order:
-- **Coalesce per competitor:** if one competitor reworded its listing three times today, one summary of the net change is cheaper *and* more useful than three. It stays one competitor per prompt and plain-text output, so the current design holds.
+The cap is defended by a funnel, not by one trick. Each layer cuts what reaches the next:
+
+| Layer | Calls/day left |
+|---|---|
+| Naive: one LLM call per poll (6,000 × 96) | 576,000 |
+| Change detection: only polls where a field that matters really changed. Noise fields, format variants (`$39 / month` vs `USD 39 per month`), partial and failed responses never count. | = real changes/day |
+| Rules: price, title and availability changes are written by code | = wording changes/day |
+| Cap: claimed atomically in Postgres; overflow is deferred to the next UTC day, newest first, with old → new still shown | ≤ 2,000 |
+
+The rules alone don't make it fit. They only remove the structured share of changes. Change detection does most of the work. The real question is how often listings are *reworded*. **Break-even is one wording change per competitor every 3 days** (2,000 / 6,000). Weekly rewording is ~860 calls/day and fits. Daily rewording is 6,000 and doesn't. Then the cap guarantees spend never goes over, and the steps below decide which summaries come first.
+
+**What happens to the overflow: newest first, not "where it left off".** Once the cap is reached, a change keeps its snapshot, its `changed: true` and its old → new values; only the AI sentence waits. At midnight UTC the waiting changes become due again, and the worker takes the **newest first** across all competitors. A summary loses value as it ages. Oldest first under steady overload would make *every* summary later each day, so nothing is ever current. Newest first keeps fresh changes on time and leaves only the overflow without an AI sentence. Two side effects, fixed by the first two steps below:
+- **Starvation:** the oldest overflow is pushed back every night and keeps saying "waiting for a summary" indefinitely.
+- **Unfairness:** one competitor rewording 50 times takes 50 of the newest slots, and another competitor's single change misses out.
+
+Next, in this order:
+- **Coalesce per competitor:** if one competitor reworded its listing three times, one summary of the net change is cheaper *and* more useful than three. The queue then holds one entry per competitor with new changes. That fixes the unfairness and means each competitor's **latest state** gets the summary. It stays one competitor per prompt and plain-text output, so the current design holds.
+- **Expire stale ones:** a change still unsummarised after a few days (say 3) gets a final "not summarised: too old" status and stops retrying. It keeps its old → new values, so nothing is hidden.
 - **Prioritise** the budget by competitor importance or size of change, and say so in the UI.
-- **Batch, but only under cap pressure.** The cap counts calls, not tokens, so one call that summarises 10 changes stretches 2,000 calls to ~20,000 summaries. When pending changes exceed today's remaining budget, the worker would claim 5–10 changes, send them in one prompt with ids, and ask for `[{"id": 1, "summary": "…"}, …]`. Below that pressure it keeps today's single calls.
+- **Batch several competitors per call, but only under cap pressure.** The cap counts calls, not tokens, so one call that summarises 10 changes stretches 2,000 calls to ~20,000 summaries. A per-call cap is unusual, though: providers bill by tokens, so Finance most likely means "keep the cost down", and batching keeps the letter of the cap rather than its intent. **I'd confirm with Finance whether they mean calls or cost before relying on it.** When pending changes exceed today's remaining budget, the worker would claim 5–10 changes, send them in one prompt with ids, and ask for `[{"id": 1, "summary": "…"}, …]`. Below that pressure it keeps today's single calls.
 
   **Why it isn't the default (and isn't built):**
   - It needs structured output: models sometimes return broken JSON, skip an item or mix up ids, so every item needs validating, with missing ones re-queued as single calls.
@@ -177,11 +193,39 @@ Claiming is already safe across instances (`SKIP LOCKED`), and so is the LLM cap
 
 ---
 
+## How I'd use the LLM with production data: competitor trends
+I built per-change summaries because the brief asks for them, and kept the LLM to wording changes so the cap goes where interpretation helps. Running it on Ollama showed something else, though: **the AI mostly restates a change a human can read in the old → new diff** ("added payroll exports to its description…"). These fixtures are short one-liners; on real listings, a rewritten paragraph is harder to read by eye, so this has to be checked against real data and real users.
+
+**If production confirms it, I'd change how the budget is spent:**
+- **Mark the changes with plain code:** a highlighted old → new diff per field and the code-written summaries that already exist. No LLM, no cap.
+- **Spend the LLM, with a bigger model, on what it's actually good at:** a **trend summary per competitor**. A per-change summary answers *"what changed?"*. A product manager's real question is *"where is this competitor heading?"*. One change says little. Ten changes over two months show a pattern, and spotting one in text is what an LLM is good at. Trends run on demand, so a pricier model per call still means far fewer calls.
+
+Until real data says otherwise, the trend summary would come **on top of** the per-change summaries, not instead of them.
+
+**Design:**
+- **Input: the list of changes, not raw snapshots.** Retention keeps every change and first snapshot for good, so the history is always there. The input is each change's date and old → new values, plus the starting listing. It's small, cheap and has no noise.
+- **On demand and stored:** a "What's the trend?" button calls `GET /api/competitors/:id/trend`. The result is stored and reused until the competitor's next change. Competitors nobody opens cost nothing. It goes through the same daily cap, with a small share reserved for trends.
+- **A bigger model for this job only:** `LLM_TREND_MODEL` (e.g. `qwen2.5:7b`). The quick per-change summary can stay on a small, fast model. Spotting a trend needs reasoning, and an on-demand wait of tens of seconds is acceptable.
+
+**Tried on Ollama `llama3.2` (3B)** with `orbit-hr`'s four changes (€8 → €10/seat/mo, → €96/yr, → free for teams under 10, tagline "HR for teams of 10 to 500" → "HR for growing teams"). The overall reading was right: a free tier for small teams and "growing teams" positioning. Two details were wrong:
+- It called €96/yr "a more premium pricing strategy". That's €8/mo, so it's cheaper.
+- It cited change [1] for the tagline change, which was change [4].
+
+So before building it:
+1. **Do the maths in code before the prompt:** send `€10/seat/mo → €96/yr (≈ €8/mo, −20%)`, never raw prices.
+2. **Check citations in code:** every claim cites a change number. An answer citing a change that doesn't exist, or the wrong field, is rejected as unusable, like a bad per-change summary today.
+3. **Label it in the UI** as an AI interpretation, with links to the changes it cites.
+
+Not built: it goes beyond the brief (summaries between *consecutive* snapshots), and the provided mock only echoes the prompt, so a reviewer couldn't see it work.
+
+---
+
 ## Left out on purpose
 - **Auth:** the brief assumes one internal user.
-- **The scaling measures above** (tiers, partitioning, shared limiter, coalescing, batching): described, not built. Retention *is* built.
+- **The scaling measures above** (tiers, partitioning, shared limiter, coalescing, expiring stale summaries, batching): described, not built. Retention *is* built.
 - **Cloud deployment** (bonus): skipped to keep the time reasonable.
 - **Fine-tuning a model:** no budget, not possible on the mock, and the problem is prompting, not model knowledge.
+- **Competitor trend summaries:** designed and tried on Ollama, not built (see above).
 - **Notifications** (email/Slack on change) and **soft delete**.
 - **Browser e2e tests in the repo:** the UI was verified manually in Chrome; automated tests cover the API, the domain logic and the UI's grouping logic (152 API + 4 web tests).
 
