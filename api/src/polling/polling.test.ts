@@ -15,8 +15,8 @@ const url = process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/competit
 const { pool, db } = createDb(url);
 const services = createServices(db);
 const app = buildApp(services, { logger: false });
-const competitors = services.data.repositories.competitors;
-const claimDueHourly = (limit: number, excludeIds: string[]) => competitors.claimDue(limit, 3600, excludeIds);
+const competitorRepository = services.data.repositories.competitorRepository;
+const claimDueHourly = (limit: number, excludeIds: string[]) => competitorRepository.claimDue(limit, 3600, excludeIds);
 const silent = { info() {}, warn() {}, error() {} };
 
 // Each fetchListing() returns the next scripted result for that id.
@@ -30,8 +30,8 @@ const source: SourceClient = {
 };
 const poll = createPollingService({
   source,
-  snapshots: services.snapshots,
-  competitors,
+  snapshotService: services.snapshotService,
+  competitorRepository,
   intervalSeconds: 3600,
   log: silent,
 }).pollCompetitor;
@@ -183,10 +183,10 @@ describe("scheduling", () => {
   test("claimDue: due rows once, oldest first, limited, then not again within the interval", async () => {
     for (const id of ["a", "b", "c"]) await add(id);
     await db.execute(sql`update competitors set next_poll_at = now() - interval '1 minute' where id = 'c'`);
-    assert.deepEqual(await competitors.claimDue(1, 60), ["c"]);
-    assert.deepEqual((await competitors.claimDue(10, 60, ["a"])).sort(), ["b"]);
-    assert.deepEqual((await competitors.claimDue(10, 60)).sort(), ["a"]);
-    assert.deepEqual(await competitors.claimDue(10, 60), []);
+    assert.deepEqual(await competitorRepository.claimDue(1, 60), ["c"]);
+    assert.deepEqual((await competitorRepository.claimDue(10, 60, ["a"])).sort(), ["b"]);
+    assert.deepEqual((await competitorRepository.claimDue(10, 60)).sort(), ["a"]);
+    assert.deepEqual(await competitorRepository.claimDue(10, 60), []);
   });
 
   test("scheduler polls due competitors; one crashing poll doesn't stop the others", async () => {

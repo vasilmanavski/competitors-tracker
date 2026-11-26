@@ -18,9 +18,9 @@ export function createSnapshotService(data: DataAccess) {
      * @throws CompetitorNotTrackedError so the UI can tell "removed" from "no polls yet"
      */
     async listTimeline(competitorId: string, page: TimelinePage): Promise<Snapshot[]> {
-      const { competitors, snapshots } = data.repositories;
-      if (!(await competitors.exists(competitorId))) throw new CompetitorNotTrackedError(competitorId);
-      return snapshots.listNewestFirst(competitorId, page);
+      const { competitorRepository, snapshotRepository } = data.repositories;
+      if (!(await competitorRepository.existsById(competitorId))) throw new CompetitorNotTrackedError(competitorId);
+      return snapshotRepository.findNewestFirst(competitorId, page);
     },
 
     /**
@@ -30,15 +30,15 @@ export function createSnapshotService(data: DataAccess) {
      * @returns null when the competitor was removed while it was being fetched
      */
     recordPoll(competitorId: string, outcome: PollOutcome, fetchedAt: Date): Promise<RecordedPoll | null> {
-      return data.transaction(async ({ competitors, snapshots }) => {
-        const competitor = await competitors.lockForUpdate(competitorId);
+      return data.transaction(async ({ competitorRepository, snapshotRepository }) => {
+        const competitor = await competitorRepository.lockForUpdate(competitorId);
         if (!competitor) return null;
 
-        const lastOk = await snapshots.findLatestOk(competitorId);
+        const lastOk = await snapshotRepository.findLatestOk(competitorId);
         const decision = detectChange(outcome, lastOk && toComparable(lastOk), competitor.listingState);
 
-        const snapshot = await snapshots.insert({ competitorId, fetchedAt, outcome, decision });
-        await competitors.recordPollResult(competitorId, {
+        const snapshot = await snapshotRepository.insert({ competitorId, fetchedAt, outcome, decision });
+        await competitorRepository.updatePollResult(competitorId, {
           polledAt: fetchedAt,
           status: outcome.status,
           listingState: decision.nextListingState,

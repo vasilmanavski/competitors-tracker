@@ -5,8 +5,8 @@ import { createSnapshotRepository } from "./snapshots/repository.ts";
 /** Builds every repository on the given executor (the pool or a transaction). */
 function createRepositories(executor: DbExecutor) {
   return {
-    competitors: createCompetitorRepository(executor),
-    snapshots: createSnapshotRepository(executor),
+    competitorRepository: createCompetitorRepository(executor),
+    snapshotRepository: createSnapshotRepository(executor),
   };
 }
 

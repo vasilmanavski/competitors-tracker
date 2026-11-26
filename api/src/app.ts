@@ -7,8 +7,8 @@ import type { SnapshotService } from "./snapshots/service.ts";
 import { registerSnapshotRoutes } from "./snapshots/routes.ts";
 
 export type AppServices = {
-  competitors: CompetitorService;
-  snapshots: SnapshotService;
+  competitorService: CompetitorService;
+  snapshotService: SnapshotService;
   pingDb: () => Promise<void>;
 };
 
@@ -17,7 +17,7 @@ export function buildApp(services: AppServices, options: { logger?: boolean } = 
   const app = Fastify({ logger: options.logger ?? true });
   registerErrorHandler(app);
   registerHealthRoutes(app, services.pingDb);
-  registerCompetitorRoutes(app, services.competitors);
-  registerSnapshotRoutes(app, services.snapshots);
+  registerCompetitorRoutes(app, services.competitorService);
+  registerSnapshotRoutes(app, services.snapshotService);
   return app;
 }

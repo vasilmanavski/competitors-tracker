@@ -21,34 +21,34 @@ function competitor(patch: Partial<Competitor> = {}): Competitor {
 }
 
 function serviceWith(repository: Partial<CompetitorRepository>) {
-  return createCompetitorService({ competitors: repository as CompetitorRepository, now: () => NOW });
+  return createCompetitorService({ competitorRepository: repository as CompetitorRepository, now: () => NOW });
 }
 
 describe("CompetitorService", () => {
-  test("list flags competitors that changed in the last 24 hours", async () => {
+  test("listTracked flags competitors that changed in the last 24 hours", async () => {
     const service = serviceWith({
-      list: async () => [
+      findAll: async () => [
         competitor({ id: "recent", lastChangedAt: hoursAgo(23) }),
         competitor({ id: "old", lastChangedAt: hoursAgo(25) }),
         competitor({ id: "never" }),
       ],
     });
-    const flags = (await service.list()).map((c) => [c.id, c.changedLast24h]);
+    const flags = (await service.listTracked()).map((c) => [c.id, c.changedLast24h]);
     assert.deepEqual(flags, [["recent", true], ["old", false], ["never", false]]);
   });
 
-  test("list flags competitors the source has never listed", async () => {
-    const service = serviceWith({ list: async () => [competitor({ listingState: "never_listed" })] });
-    assert.equal((await service.list())[0]?.neverFound, true);
+  test("listTracked flags competitors the source has never listed", async () => {
+    const service = serviceWith({ findAll: async () => [competitor({ listingState: "never_listed" })] });
+    assert.equal((await service.listTracked())[0]?.neverFound, true);
   });
 
-  test("add rejects an id that is already tracked", async () => {
-    const service = serviceWith({ create: async () => null });
-    await assert.rejects(service.add("acme-crm"), CompetitorAlreadyTrackedError);
+  test("startTracking rejects an id that is already tracked", async () => {
+    const service = serviceWith({ insert: async () => null });
+    await assert.rejects(service.startTracking("acme-crm"), CompetitorAlreadyTrackedError);
   });
 
-  test("remove rejects an id that is not tracked", async () => {
-    const service = serviceWith({ remove: async () => false });
-    await assert.rejects(service.remove("acme-crm"), CompetitorNotTrackedError);
+  test("stopTracking rejects an id that is not tracked", async () => {
+    const service = serviceWith({ deleteById: async () => false });
+    await assert.rejects(service.stopTracking("acme-crm"), CompetitorNotTrackedError);
   });
 });

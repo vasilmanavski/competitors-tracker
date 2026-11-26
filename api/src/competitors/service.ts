@@ -10,8 +10,8 @@ export type CompetitorOverview = Competitor & {
 };
 
 /** Use cases for the tracked-competitor list. */
-export function createCompetitorService(deps: { competitors: CompetitorRepository; now?: () => Date }) {
-  const { competitors, now = () => new Date() } = deps;
+export function createCompetitorService(deps: { competitorRepository: CompetitorRepository; now?: () => Date }) {
+  const { competitorRepository, now = () => new Date() } = deps;
 
   function toOverview(competitor: Competitor, at: Date): CompetitorOverview {
     return {
@@ -22,9 +22,10 @@ export function createCompetitorService(deps: { competitors: CompetitorRepositor
   }
 
   return {
-    async list(): Promise<CompetitorOverview[]> {
+    /** Every tracked competitor with its status flags, oldest first. */
+    async listTracked(): Promise<CompetitorOverview[]> {
       const at = now();
-      return (await competitors.list()).map((competitor) => toOverview(competitor, at));
+      return (await competitorRepository.findAll()).map((competitor) => toOverview(competitor, at));
     },
 
     /**
@@ -32,8 +33,8 @@ export function createCompetitorService(deps: { competitors: CompetitorRepositor
      * id is accepted and shows up as "not found" in its timeline after the first poll.
      * @throws CompetitorAlreadyTrackedError
      */
-    async add(id: string): Promise<CompetitorOverview> {
-      const created = await competitors.create(id);
+    async startTracking(id: string): Promise<CompetitorOverview> {
+      const created = await competitorRepository.insert(id);
       if (!created) throw new CompetitorAlreadyTrackedError(id);
       return toOverview(created, now());
     },
@@ -42,8 +43,8 @@ export function createCompetitorService(deps: { competitors: CompetitorRepositor
      * Stops tracking an id and deletes its history.
      * @throws CompetitorNotTrackedError
      */
-    async remove(id: string): Promise<void> {
-      if (!(await competitors.remove(id))) throw new CompetitorNotTrackedError(id);
+    async stopTracking(id: string): Promise<void> {
+      if (!(await competitorRepository.deleteById(id))) throw new CompetitorNotTrackedError(id);
     },
   };
 }

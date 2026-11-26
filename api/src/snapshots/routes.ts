@@ -13,11 +13,11 @@ const TimelineQuery = z.object({
 });
 
 /** `GET /api/competitors/:id/snapshots?limit=&before=` (newest first). */
-export function registerSnapshotRoutes(app: FastifyInstance, snapshots: SnapshotService): void {
+export function registerSnapshotRoutes(app: FastifyInstance, snapshotService: SnapshotService): void {
   app.get<{ Params: { id: string }; Querystring: unknown }>("/api/competitors/:id/snapshots", async (request) => {
     const id = CompetitorId.parse(request.params.id);
     const { limit, before } = TimelineQuery.parse(request.query);
-    const rows = await snapshots.listTimeline(id, { limit, before: before ? new Date(before) : undefined });
+    const rows = await snapshotService.listTimeline(id, { limit, before: before ? new Date(before) : undefined });
     return rows.map(toSnapshotDto);
   });
 }

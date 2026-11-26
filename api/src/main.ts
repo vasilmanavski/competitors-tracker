@@ -24,8 +24,8 @@ function createPollingScheduler(config: Config, services: Services, log: PollLog
   });
   const polling = createPollingService({
     source,
-    snapshots: services.snapshots,
-    competitors: services.data.repositories.competitors,
+    snapshotService: services.snapshotService,
+    competitorRepository: services.data.repositories.competitorRepository,
     intervalSeconds: config.POLL_INTERVAL_SECONDS,
     log,
   });

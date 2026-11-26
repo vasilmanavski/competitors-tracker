@@ -16,23 +16,23 @@ export type PollResultUpdate = {
 export function createCompetitorRepository(db: DbExecutor) {
   return {
     /** All tracked competitors, oldest first. */
-    list(): Promise<Competitor[]> {
+    findAll(): Promise<Competitor[]> {
       return db.select().from(competitors).orderBy(asc(competitors.createdAt), asc(competitors.id));
     },
 
-    async exists(id: string): Promise<boolean> {
+    async existsById(id: string): Promise<boolean> {
       const rows = await db.select({ id: competitors.id }).from(competitors).where(eq(competitors.id, id));
       return rows.length > 0;
     },
 
     /** Inserts the competitor; returns null when the id is already tracked. Safe under concurrent adds. */
-    async create(id: string): Promise<Competitor | null> {
+    async insert(id: string): Promise<Competitor | null> {
       const rows = await db.insert(competitors).values({ id }).onConflictDoNothing().returning();
       return rows[0] ?? null;
     },
 
     /** Deletes the competitor and, by cascade, its snapshots. Returns false when nothing was deleted. */
-    async remove(id: string): Promise<boolean> {
+    async deleteById(id: string): Promise<boolean> {
       const rows = await db.delete(competitors).where(eq(competitors.id, id)).returning({ id: competitors.id });
       return rows.length > 0;
     },
@@ -47,7 +47,7 @@ export function createCompetitorRepository(db: DbExecutor) {
       return row ?? null;
     },
 
-    async recordPollResult(id: string, update: PollResultUpdate): Promise<void> {
+    async updatePollResult(id: string, update: PollResultUpdate): Promise<void> {
       await db
         .update(competitors)
         .set({

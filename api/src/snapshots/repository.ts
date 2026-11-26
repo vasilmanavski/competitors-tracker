@@ -77,7 +77,7 @@ export function createSnapshotRepository(db: DbExecutor) {
       return row;
     },
 
-    listNewestFirst(competitorId: string, page: TimelinePage): Promise<Snapshot[]> {
+    findNewestFirst(competitorId: string, page: TimelinePage): Promise<Snapshot[]> {
       return db
         .select()
         .from(snapshots)

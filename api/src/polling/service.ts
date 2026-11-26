@@ -11,8 +11,8 @@ export type PollLogger = {
 
 export type PollingServiceDeps = {
   source: SourceClient;
-  snapshots: Pick<SnapshotService, "recordPoll">;
-  competitors: Pick<CompetitorRepository, "claimDue">;
+  snapshotService: Pick<SnapshotService, "recordPoll">;
+  competitorRepository: Pick<CompetitorRepository, "claimDue">;
   intervalSeconds: number;
   log: PollLogger;
 };
@@ -34,19 +34,19 @@ export function toOutcome(result: FetchResult): PollOutcome {
 
 /** Use cases the scheduler drives: claim due competitors, then poll each one. */
 export function createPollingService(deps: PollingServiceDeps) {
-  const { source, snapshots, competitors, intervalSeconds, log } = deps;
+  const { source, snapshotService, competitorRepository, intervalSeconds, log } = deps;
 
   return {
     /** Claims up to `limit` competitors that are due, skipping the ids already being polled. */
     claimDue(limit: number, excludeIds: string[]): Promise<string[]> {
-      return competitors.claimDue(limit, intervalSeconds, excludeIds);
+      return competitorRepository.claimDue(limit, intervalSeconds, excludeIds);
     },
 
     /** Fetches, normalises and stores one competitor's listing. Every poll yields one snapshot. */
     async pollCompetitor(competitorId: string, signal?: AbortSignal): Promise<void> {
       const result = await source.fetchListing(competitorId, signal);
       const outcome = toOutcome(result);
-      const recorded = await snapshots.recordPoll(competitorId, outcome, new Date());
+      const recorded = await snapshotService.recordPoll(competitorId, outcome, new Date());
       if (!recorded) {
         log.info({ competitorId }, "poll dropped: competitor was removed while fetching");
         return;

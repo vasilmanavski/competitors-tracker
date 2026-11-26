@@ -8,8 +8,8 @@ export function createServices(db: Db) {
   const data = createDataAccess(db);
   return {
     data,
-    competitors: createCompetitorService({ competitors: data.repositories.competitors }),
-    snapshots: createSnapshotService(data),
+    competitorService: createCompetitorService({ competitorRepository: data.repositories.competitorRepository }),
+    snapshotService: createSnapshotService(data),
     pingDb: () => pingDb(db),
   };
 }
