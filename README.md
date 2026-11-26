@@ -152,10 +152,16 @@ The brief: 6,000 competitors every 15 min, a 5 req/s source, 2,000 LLM calls/day
 - **New competitors first:** when behind, a newly added competitor currently queues behind overdue ones. Defaulting its `next_poll_at` to the past is a one-line fix (not built).
 
 **2. 2,000 LLM calls/day can't cover every change.**
-If each of 6,000 competitors changes once a week, that's ~860 changes/day and it fits. Once a day each, it's 6,000 and it doesn't. Already built: the LLM only runs on changes that matter, structured changes never use it, and overflow is deferred to the next day with the old → new values still shown. Next:
-- **Coalesce:** one summary per competitor per day covering all its wording changes, instead of one per change.
-- **Batch:** summarise several competitors' changes in one call (the cap counts calls, not tokens).
+If each of 6,000 competitors changes once a week, that's ~860 changes/day and it fits. Once a day each, it's 6,000 and it doesn't. Already built: the LLM only runs on changes that matter, structured changes never use it, and overflow is deferred to the next day with the old → new values still shown. Next, in this order:
+- **Coalesce per competitor:** if one competitor reworded its listing three times today, one summary of the net change is cheaper *and* more useful than three. It stays one competitor per prompt and plain-text output, so the current design holds.
 - **Prioritise** the budget by competitor importance or size of change, and say so in the UI.
+- **Batch, but only under cap pressure.** The cap counts calls, not tokens, so one call that summarises 10 changes stretches 2,000 calls to ~20,000 summaries. When pending changes exceed today's remaining budget, the worker would claim 5–10 changes, send them in one prompt with ids, and ask for `[{"id": 1, "summary": "…"}, …]`. Below that pressure it keeps today's single calls.
+
+  **Why it isn't the default (and isn't built):**
+  - It needs structured output: models sometimes return broken JSON, skip an item or mix up ids, so every item needs validating, with missing ones re-queued as single calls.
+  - One failure hits the whole batch: a timeout delays all ten summaries.
+  - **Cross-talk:** with ten competitors in one prompt, a model can blend details between them, the kind of wrong fact the rule summaries exist to avoid.
+  - **It can't be shown with the provided mock**, which only echoes the first 160 characters of the prompt and could never return a per-item answer, so every batch would come back unusable.
 
 **3. History: ~52 million rows.**
 6,000 × 96 polls/day × 90 days = **51.8M rows**. Most are "no change" rows carrying a full copy of the listing text: tens of GB with indexes. What I'd do:
