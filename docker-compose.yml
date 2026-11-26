@@ -1,0 +1,102 @@
+# One command: `docker compose up --build`
+#
+# The API reaches the listing source and the LLM only through SOURCE_BASE_URL
+# and LLM_BASE_URL. To use your own instances, override those two variables
+# (e.g. in a .env file next to this one) instead of the bundled services.
+
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: competitorpulse
+      POSTGRES_PASSWORD: competitorpulse
+      POSTGRES_DB: competitorpulse
+    ports:
+      - "5433:5432" # 5433 on the host, to avoid clashing with a local Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U competitorpulse -d competitorpulse"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Provided listing source, run unmodified.
+  listing-source:
+    image: node:22-alpine
+    working_dir: /srv
+    command: ["node", "listing-source-server.mjs"]
+    volumes:
+      - type: bind
+        source: ./provided/listing-source
+        target: /srv
+        read_only: true
+    ports:
+      - "4002:4002"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4002/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Provided mock LLM (OpenAI Chat Completions shape), run unmodified.
+  mock-llm:
+    image: python:3.12-alpine
+    working_dir: /srv
+    command: ["python", "-u", "mock-llm-server.py"]
+    volumes:
+      - type: bind
+        source: ./provided/mock-llm
+        target: /srv
+        read_only: true
+    ports:
+      - "4001:4001"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4001/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: ./api
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://competitorpulse:competitorpulse@postgres:5432/competitorpulse
+      SOURCE_BASE_URL: ${SOURCE_BASE_URL:-http://listing-source:4002}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-900}
+      SOURCE_RATE_LIMIT_PER_SECOND: ${SOURCE_RATE_LIMIT_PER_SECOND:-5}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://mock-llm:4001/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-not-needed-for-mock}
+      LLM_MODEL: ${LLM_MODEL:-mock-model}
+      LLM_DAILY_CAP: ${LLM_DAILY_CAP:-2000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      listing-source:
+        condition: service_healthy
+      mock-llm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

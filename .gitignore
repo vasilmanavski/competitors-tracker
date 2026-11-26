@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.DS_Store
+
+# The assignment brief stays local; the provided servers live in provided/
+fullstack_developer_backend_focus-assignment/
+
+# IDE
+.idea/
+*.iml

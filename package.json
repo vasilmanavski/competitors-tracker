@@ -1,0 +1,16 @@
+{
+  "name": "competitorpulse",
+  "private": true,
+  "scripts": {
+    "setup": "npm install && npm --prefix api install && npm --prefix web install && (createdb competitorpulse 2>/dev/null || true) && (test -f api/.env || cp api/.env.example api/.env)",
+    "dev:all": "concurrently -k -n source,llm,api,web -c blue,magenta,green,cyan \"npm:dev:source\" \"npm:dev:llm\" \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:source": "cd provided/listing-source && node listing-source-server.mjs",
+    "dev:llm": "cd provided/mock-llm && python3 -u mock-llm-server.py",
+    "dev:api": "npm --prefix api run dev",
+    "dev:web": "npm --prefix web run dev",
+    "typecheck": "npm --prefix api run typecheck && npm --prefix web run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7"
+  }
+}
