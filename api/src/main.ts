@@ -6,6 +6,7 @@ import { type Config, loadConfig } from "./config.ts";
 import { createDb, runMigrations, waitForDb } from "./db/client.ts";
 import { createScheduler, type Scheduler, type SchedulerLogger } from "./polling/scheduler.ts";
 import { createPollingService, type PollLogger } from "./polling/service.ts";
+import { createRetentionService, type RetentionLogger } from "./retention/service.ts";
 import { createServices, type Services } from "./services.ts";
 import { createSummaryService, type SummaryLogger } from "./summaries/service.ts";
 
@@ -62,6 +63,24 @@ function createSummaryScheduler(config: Config, services: Services, log: Summary
   });
 }
 
+/** How often expired snapshots are purged; it also runs once at startup. */
+const RETENTION_TICK_MS = 60 * 60 * 1000;
+const RETENTION_JOB_ID = "purge-expired-snapshots";
+
+/** A single job on the generic scheduler: never two purges at once, re-armed after each run. */
+function createRetentionScheduler(config: Config, services: Services, log: RetentionLogger & SchedulerLogger): Scheduler {
+  const retention = createRetentionService({ data: services.data, retentionDays: config.SNAPSHOT_RETENTION_DAYS, log });
+  return createScheduler({
+    claimDue: async (limit) => (limit > 0 ? [RETENTION_JOB_ID] : []),
+    runJob: async (_jobId, signal) => {
+      await retention.purgeExpiredSnapshots(signal);
+    },
+    maxInFlight: 1,
+    tickMs: RETENTION_TICK_MS,
+    log,
+  });
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const { pool, db } = createDb(config.DATABASE_URL);
@@ -72,10 +91,11 @@ async function main(): Promise<void> {
   const app = buildApp(services);
   const pollingScheduler = createPollingScheduler(config, services, app.log.child({ component: "poller" }));
   const summaryScheduler = createSummaryScheduler(config, services, app.log.child({ component: "summaries" }));
+  const retentionScheduler = createRetentionScheduler(config, services, app.log.child({ component: "retention" }));
 
   const shutdown = async (signal: string) => {
     app.log.info(`${signal} received, shutting down`);
-    await Promise.all([pollingScheduler.stop(), summaryScheduler.stop()]);
+    await Promise.all([pollingScheduler.stop(), summaryScheduler.stop(), retentionScheduler.stop()]);
     await app.close();
     await pool.end();
     process.exit(0);
@@ -86,16 +106,18 @@ async function main(): Promise<void> {
   await app.listen({ host: "0.0.0.0", port: config.PORT });
 
   if (!config.SCHEDULER_ENABLED) {
-    app.log.warn("SCHEDULER_ENABLED=false: not polling the source or generating summaries");
+    app.log.warn("SCHEDULER_ENABLED=false: no polling, summaries or retention");
     return;
   }
   pollingScheduler.start();
   summaryScheduler.start();
+  retentionScheduler.start();
   app.log.info(
     { source: config.SOURCE_BASE_URL, intervalSeconds: config.POLL_INTERVAL_SECONDS, ratePerSecond: config.SOURCE_RATE_LIMIT_PER_SECOND },
     "polling started",
   );
   app.log.info({ llm: config.LLM_BASE_URL, model: config.LLM_MODEL, dailyCap: config.LLM_DAILY_CAP }, "summaries started");
+  app.log.info({ retentionDays: config.SNAPSHOT_RETENTION_DAYS }, "retention started");
 }
 
 main().catch((err: unknown) => {

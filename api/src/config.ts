@@ -19,6 +19,9 @@ const ConfigSchema = z.object({
   /** Hard cap on LLM calls per UTC day, across all competitors and instances. */
   LLM_DAILY_CAP: z.coerce.number().int().nonnegative().default(2000),
   LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  /** Uneventful snapshots older than this are purged; changes are kept. The brief requires at least 90. */
+  SNAPSHOT_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

@@ -1,0 +1,1 @@
+CREATE INDEX "snapshots_uneventful_fetched_idx" ON "snapshots" USING btree ("fetched_at") WHERE not "snapshots"."changed" and "snapshots"."summary_status" <> 'first_snapshot';

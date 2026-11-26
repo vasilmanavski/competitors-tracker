@@ -74,7 +74,7 @@ Snapshot fields: at least `fetchedAt, title, tagline, price, description, change
 |---|---|---|
 | 2.1 | `changed` + the timeline UI belong in this epic, not in the LLM epic. | **DECIDED** |
 | 2.2 | **Delisting and relisting count as changes** (`changed: true`). They're based only on a confirmed `not_found` (HTTP 404), **never** on `fetch_failed`. | **DECIDED** |
-| 2.3 | **Every poll is stored**, including no-change, failed and not-found polls. The brief requires 90 days of history covering them. | **DECIDED** (brief) |
+| 2.3 | **Every poll is stored**, including no-change, failed and not-found polls. The brief requires 90 days of history covering them. Retention later added in Epic 4 (4.5): uneventful polls older than 90 days are purged; changes, first snapshots and the latest complete listing are kept. | **DECIDED** (brief) |
 | 2.4 | Normalise to 4 fields; drop all noise. Text: decode `&amp;`/`&nbsp;`, trim, collapse whitespace. Price parsed into `{amount, currency, period}` and compared on that, not on the string. | **PROPOSED** (implemented) |
 | 2.5 | "Changed" = any normalised field differs from the **last `ok` snapshot** (or ok↔not_found per 2.2). | **PROPOSED** (implemented) |
 | 2.6 | A partial listing is stored as `partial`, `changed: false`, `summary_status: incomplete_listing`. It's never reported as "field removed", and never used as the comparison baseline. | **PROPOSED** (implemented) |

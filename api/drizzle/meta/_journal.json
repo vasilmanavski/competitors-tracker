@@ -36,6 +36,13 @@
       "when": 1795688962184,
       "tag": "0004_summary_source",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795698673026,
+      "tag": "0005_retention",
+      "breakpoints": true
     }
   ]
 }

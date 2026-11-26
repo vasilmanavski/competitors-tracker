@@ -134,6 +134,32 @@ export function createSnapshotRepository(db: DbExecutor) {
       await db.update(snapshots).set(update).where(eq(snapshots.id, id));
     },
 
+    /**
+     * Deletes up to `limit` uneventful snapshots (no change: unchanged, incomplete, failed or
+     * still-not-listed polls) fetched before `cutoff`. Changes and first snapshots are history
+     * worth keeping, and each competitor's latest complete listing is kept because it is the
+     * baseline the next poll is compared with, however old it is.
+     * @returns how many rows were deleted
+     */
+    async deleteUneventfulBefore(cutoff: Date, limit: number): Promise<number> {
+      const result = await db.execute(sql`
+        delete from ${snapshots}
+        where id in (
+          select s.id from ${snapshots} s
+          where s.fetched_at < ${cutoff}
+            and not s.changed
+            and s.summary_status <> 'first_snapshot'
+            and s.id <> coalesce((
+              select ok.id from ${snapshots} ok
+              where ok.competitor_id = s.competitor_id and ok.status = 'ok'
+              order by ok.fetched_at desc, ok.id desc
+              limit 1
+            ), 0)
+          limit ${limit}
+        )`);
+      return result.rowCount ?? 0;
+    },
+
     findNewestFirst(competitorId: string, page: TimelinePage): Promise<Snapshot[]> {
       return db
         .select()
