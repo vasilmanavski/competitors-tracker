@@ -1,3 +1,4 @@
+import { PollingIndicator } from "../PollingIndicator.tsx";
 import { SnapshotCard } from "./SnapshotCard.tsx";
 import { useTimeline } from "./useTimeline.ts";
 
@@ -24,7 +25,9 @@ export function Timeline({ id }: { id: string }) {
         </p>
       )}
       {timeline.state === "ready" && timeline.snapshots.length === 0 && (
-        <p className="muted">Waiting for the first poll…</p>
+        <div className="timeline-waiting">
+          <PollingIndicator label="Fetching the first listing from the source…" />
+        </div>
       )}
       {timeline.state === "ready" && timeline.snapshots.length > 0 && (
         <>

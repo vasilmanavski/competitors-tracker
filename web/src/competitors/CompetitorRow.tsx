@@ -1,5 +1,6 @@
 import type { Competitor, SnapshotStatus } from "../api.ts";
 import { absoluteTime, relativeTime } from "../format.ts";
+import { PollingIndicator } from "../PollingIndicator.tsx";
 import { timelineHref } from "../router.ts";
 
 const STATUS_LABELS: Record<SnapshotStatus, string> = {
@@ -13,9 +14,15 @@ const NEVER_FOUND_HINT = "Every answer from the source so far was 404. Check the
 
 function LastPoll({ competitor }: { competitor: Competitor }) {
   const { lastPolledAt, lastStatus } = competitor;
-  if (!lastPolledAt || !lastStatus) return <span className="competitor-meta muted">not polled yet</span>;
+  if (!lastPolledAt || !lastStatus) {
+    return (
+      <span className="competitor-meta">
+        <PollingIndicator label="Fetching listing…" />
+      </span>
+    );
+  }
   return (
-    <span className="competitor-meta muted" title={absoluteTime(lastPolledAt)}>
+    <span className="competitor-meta muted fade-in" title={absoluteTime(lastPolledAt)}>
       last poll {relativeTime(lastPolledAt)} · {STATUS_LABELS[lastStatus]}
     </span>
   );

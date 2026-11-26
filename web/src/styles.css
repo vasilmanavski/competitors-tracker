@@ -197,3 +197,63 @@ button:disabled {
 .load-older {
   margin-top: 0.25rem;
 }
+
+.polling-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--link);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.spinner {
+  width: 0.8em;
+  height: 0.8em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.timeline-waiting {
+  padding: 1.5rem 0;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+}
+
+.fade-in {
+  animation: fade-in 0.4s ease-out;
+}
+
+.snapshot {
+  animation: fade-in 0.4s ease-out;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .polling-indicator,
+  .fade-in,
+  .snapshot {
+    animation: none;
+  }
+}
