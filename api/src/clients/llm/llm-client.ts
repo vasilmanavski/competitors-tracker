@@ -1,5 +1,7 @@
 import { z } from "zod";
-import type { ChatMessage } from "./prompt.ts";
+
+/** One chat message, in the OpenAI Chat Completions shape. */
+export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 /** What one completion request produced. Only a caller abort is thrown. */
 export type CompletionResult =

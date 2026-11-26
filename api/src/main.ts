@@ -1,12 +1,12 @@
 import { buildApp } from "./app.ts";
+import { createRateLimiter } from "./clients/listing-source/rate-limiter.ts";
+import { createSourceClient } from "./clients/listing-source/source-client.ts";
+import { createLlmClient } from "./clients/llm/llm-client.ts";
 import { type Config, loadConfig } from "./config.ts";
 import { createDb, runMigrations, waitForDb } from "./db/client.ts";
-import { createPollingService, type PollLogger } from "./polling/service.ts";
 import { createScheduler, type Scheduler, type SchedulerLogger } from "./polling/scheduler.ts";
+import { createPollingService, type PollLogger } from "./polling/service.ts";
 import { createServices, type Services } from "./services.ts";
-import { createRateLimiter } from "./source/rate-limiter.ts";
-import { createSourceClient } from "./source/source-client.ts";
-import { createLlmClient } from "./summaries/llm-client.ts";
 import { createSummaryService, type SummaryLogger } from "./summaries/service.ts";
 
 /** Summaries in flight at once: enough to overlap slow LLM answers without flooding the provider. */
