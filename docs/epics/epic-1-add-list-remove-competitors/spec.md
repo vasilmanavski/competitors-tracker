@@ -42,7 +42,7 @@ Extra fields can be added to the list response later (e.g. `changedLast24h` in E
 | # | Decision | Status |
 |---|---|---|
 | 1.1 | **Delete = hard delete, with cascade to all snapshots.** Re-adding starts a fresh history. Alternative considered: soft delete (stop polling, keep history, resume on re-add). | **DECIDED** |
-| 1.2 | **Unknown id → accept (201)** and schedule it for polling right away. The timeline then shows `not_found`. We never reject on a source 404, because 404 also means "temporarily delisted", and a request-time check against a rate-limited, flaky source would make `POST` flaky too. | **PROPOSED** |
+| 1.2 | **Unknown id → accept (201)** and schedule it for polling right away. The timeline then shows `not_found`. We never reject on a source 404, because 404 also means "temporarily delisted", and a request-time check against a rate-limited, flaky source would make `POST` flaky too. Epic 2 adds a "never found at source" status on the list so typos are visible after the first poll. | **DECIDED** |
 | 1.3 | Id validation: trim + lowercase, must match `^[a-z0-9-]{1,64}$`. Otherwise 400 with a message. | **PROPOSED** |
 | 1.4 | Duplicate add → **409 Conflict**. Alternative: idempotent 201. | **PROPOSED** |
 | 1.5 | Delete of an unknown id → 404. Alternative: idempotent 204. | **PROPOSED** (implemented as 404; the UI just re-fetches, so either answer works) |
