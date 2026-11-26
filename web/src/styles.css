@@ -236,6 +236,14 @@ button:disabled {
   border-radius: 4px;
 }
 
+.ai-summary--rule {
+  background: #f3f8f3;
+}
+
+.ai-summary--rule .ai-label {
+  color: #2e7d32;
+}
+
 .ai-summary--waiting {
   background: transparent;
   padding-left: 0;

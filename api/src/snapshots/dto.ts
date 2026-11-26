@@ -22,6 +22,7 @@ export function toSnapshotDto(snapshot: Snapshot) {
     missingFields: snapshot.missingFields,
     summary: snapshot.summary,
     summaryStatus: snapshot.summaryStatus,
+    summarySource: snapshot.summarySource,
     summaryError: snapshot.summaryError,
     summaryAttempts: snapshot.summaryAttempts,
     summaryRetryAt: snapshot.summaryNextAttemptAt?.toISOString() ?? null,

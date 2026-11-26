@@ -10,6 +10,8 @@ const FIELD_LABELS: Record<string, string> = {
   availability: "Availability",
 };
 
+const RULE_SUMMARY_HINT = "Written from the old and new values, without an AI call.";
+
 function ChangeRow({ change }: { change: FieldChange }) {
   return (
     <li>
@@ -27,9 +29,12 @@ function ChangeRow({ change }: { change: FieldChange }) {
 
 function AiSummary({ snapshot }: { snapshot: Snapshot }) {
   if (snapshot.summary) {
+    const isRule = snapshot.summarySource === "rule";
     return (
-      <p className="ai-summary">
-        <span className="ai-label">AI summary</span>
+      <p className={isRule ? "ai-summary ai-summary--rule" : "ai-summary"}>
+        <span className="ai-label" title={isRule ? RULE_SUMMARY_HINT : undefined}>
+          {isRule ? "Summary" : "AI summary"}
+        </span>
         {snapshot.summary}
       </p>
     );

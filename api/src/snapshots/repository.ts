@@ -1,6 +1,6 @@
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 import type { DbExecutor } from "../db/client.ts";
-import { type SummaryStatus, snapshots } from "../db/schema.ts";
+import { SUMMARY_SOURCES, type SummaryStatus, snapshots } from "../db/schema.ts";
 import type { ChangeDecision, PollOutcome } from "../listings/change-detection.ts";
 import type { FieldChange } from "../listings/field-changes.ts";
 import type { Price, PricePeriod } from "../listings/normalize.ts";
@@ -14,8 +14,18 @@ export type NewSnapshot = {
   outcome: PollOutcome;
   decision: ChangeDecision;
   changes: FieldChange[];
-  /** When the summary worker should pick it up; null when there is nothing to summarise. */
-  summaryDueAt: Date | null;
+  initialSummary: InitialSummary;
+};
+
+export type SummarySource = (typeof SUMMARY_SOURCES)[number];
+
+/** The summary a snapshot starts with: written by our rules, queued for the LLM, or not needed. */
+export type InitialSummary = {
+  status: SummaryStatus;
+  text: string | null;
+  source: SummarySource | null;
+  /** When the summary worker should pick it up; null when no LLM call is needed. */
+  dueAt: Date | null;
 };
 
 /** The result of one summary attempt, written back onto the snapshot. */
@@ -25,6 +35,7 @@ export type SummaryUpdate = {
   summaryError: string | null;
   summaryAttempts: number;
   summaryNextAttemptAt: Date | null;
+  summarySource: SummarySource | null;
 };
 
 /** A page of the timeline: newest first, strictly older than `before` when given. */
@@ -55,7 +66,7 @@ function listingColumns(outcome: PollOutcome) {
   };
 }
 
-function toRow({ competitorId, fetchedAt, outcome, decision, changes, summaryDueAt }: NewSnapshot) {
+function toRow({ competitorId, fetchedAt, outcome, decision, changes, initialSummary }: NewSnapshot) {
   return {
     competitorId,
     fetchedAt,
@@ -63,11 +74,12 @@ function toRow({ competitorId, fetchedAt, outcome, decision, changes, summaryDue
     ...listingColumns(outcome),
     changed: decision.changed,
     changedFields: decision.changedFields,
-    summary: null,
-    summaryStatus: decision.summaryStatus,
+    summary: initialSummary.text,
+    summaryStatus: initialSummary.status,
+    summarySource: initialSummary.source,
     error: outcome.status === "fetch_failed" ? outcome.error : null,
     changes,
-    summaryNextAttemptAt: summaryDueAt,
+    summaryNextAttemptAt: initialSummary.dueAt,
   };
 }
 

@@ -42,6 +42,8 @@ export type Snapshot = {
   missingFields: string[];
   summary: string | null;
   summaryStatus: SummaryStatus;
+  /** `rule`: written by our code for price/title/availability changes; `llm`: by the AI. */
+  summarySource: "rule" | "llm" | null;
   summaryError: string | null;
   summaryAttempts: number;
   summaryRetryAt: string | null;

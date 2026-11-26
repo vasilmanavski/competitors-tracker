@@ -24,7 +24,7 @@ let prompts: ChatMessage[][] = [];
 const llm: LlmClient = {
   async complete(messages) {
     prompts.push(messages);
-    return answers.shift() ?? { kind: "answer", content: "Price dropped from $39/mo to $29/mo.", finishReason: "stop" };
+    return answers.shift() ?? { kind: "answer", content: "The tagline now pitches the CRM as loved by small teams.", finishReason: "stop" };
   },
 };
 const summaryService = (dailyCap = 100) => createSummaryService({ data: services.data, llm, dailyCap, log: silent });
@@ -48,12 +48,12 @@ async function record(competitorId: string, outcome: PollOutcome) {
   return recorded.snapshot;
 }
 
-/** Adds a competitor and records first → unchanged → price change; returns the changed snapshot. */
-async function trackWithPriceChange(id = "acme-crm") {
+/** Adds a competitor and records first → unchanged → a wording change (an LLM job); returns the changed snapshot. */
+async function trackWithTaglineChange(id = "acme-crm") {
   await services.competitorService.startTracking(id);
   await record(id, listing());
   await record(id, listing({ price: "USD 39 per month" }));
-  return record(id, listing({ price: "$29 / month" }));
+  return record(id, listing({ tagline: "The CRM small teams love" }));
 }
 
 async function makeDueNow(snapshotId: number) {
@@ -76,9 +76,9 @@ after(async () => {
 });
 
 describe("recording a change", () => {
-  test("a change is stored with old → new values and queued; other polls are not", async () => {
-    const changed = await trackWithPriceChange();
-    assert.deepEqual(changed.changes, [{ field: "price", before: "$39/mo", after: "$29/mo" }]);
+  test("a wording change is stored with old → new values and queued for the LLM; other polls are not", async () => {
+    const changed = await trackWithTaglineChange();
+    assert.deepEqual(changed.changes, [{ field: "tagline", before: "Simple CRM for small teams", after: "The CRM small teams love" }]);
     assert.equal(changed.summaryStatus, "pending");
     assert.notEqual(changed.summaryNextAttemptAt, null);
 
@@ -86,17 +86,38 @@ describe("recording a change", () => {
     assert.equal(queued.rows[0]?.n, 1);
   });
 
-  test("a delisting is queued as listed → not listed", async () => {
+  test("a price change is summarised by our rules at once: no LLM job", async () => {
+    await services.competitorService.startTracking("acme-crm");
+    await record("acme-crm", listing());
+    const changed = await record("acme-crm", listing({ price: "$29 / month" }));
+    assert.deepEqual(changed.changes, [{ field: "price", before: "$39/mo", after: "$29/mo" }]);
+    assert.equal(changed.summaryStatus, "summarized");
+    assert.equal(changed.summarySource, "rule");
+    assert.equal(changed.summary, "Price dropped from $39/mo to $29/mo (-26%).");
+    assert.equal(changed.summaryNextAttemptAt, null);
+    assert.deepEqual(await summaryService().claimDue(10, []), []);
+  });
+
+  test("a delisting is listed → not listed, summarised by our rules", async () => {
     await services.competitorService.startTracking("acme-crm");
     await record("acme-crm", listing());
     const delisted = await record("acme-crm", { status: "not_found" });
     assert.deepEqual(delisted.changes, [{ field: "availability", before: "listed", after: "not listed" }]);
+    assert.equal(delisted.summarySource, "rule");
+  });
+
+  test("a price change together with a wording change goes to the LLM as one job", async () => {
+    await services.competitorService.startTracking("acme-crm");
+    await record("acme-crm", listing());
+    const changed = await record("acme-crm", listing({ price: "$29/mo", description: "Now with AI follow-ups." }));
+    assert.equal(changed.summaryStatus, "pending");
+    assert.equal(changed.changes.length, 2);
   });
 });
 
 describe("summarising", () => {
   test("a due change gets a summary; the prompt holds only the changes", async () => {
-    const changed = await trackWithPriceChange();
+    const changed = await trackWithTaglineChange();
     const service = summaryService();
     const claimed = await service.claimDue(10, []);
     assert.deepEqual(claimed, [String(changed.id)]);
@@ -104,10 +125,11 @@ describe("summarising", () => {
 
     const stored = await reload(changed.id);
     assert.equal(stored.summaryStatus, "summarized");
-    assert.equal(stored.summary, "Price dropped from $39/mo to $29/mo.");
+    assert.equal(stored.summary, "The tagline now pitches the CRM as loved by small teams.");
+    assert.equal(stored.summarySource, "llm");
     assert.equal(stored.summaryNextAttemptAt, null);
     assert.equal(prompts.length, 1);
-    assert.match(prompts[0]?.[1]?.content ?? "", /^Price: "\$39\/mo" → "\$29\/mo"\. Competitor: Acme CRM \(acme-crm\)\.$/);
+    assert.equal(prompts[0]?.[1]?.content, 'Tagline: "Simple CRM for small teams" → "The CRM small teams love". Competitor: Acme CRM (acme-crm).');
     assert.equal(await llmUsageRepository.findCallsToday(), 1);
   });
 
@@ -119,21 +141,21 @@ describe("summarising", () => {
   });
 
   test("a claimed snapshot is not claimed again while its lease runs", async () => {
-    await trackWithPriceChange();
+    await trackWithTaglineChange();
     const service = summaryService();
     assert.equal((await service.claimDue(10, [])).length, 1);
     assert.deepEqual(await service.claimDue(10, []), []);
   });
 
   test("newest change is claimed first", async () => {
-    const older = await trackWithPriceChange("older");
-    const newer = await trackWithPriceChange("newer");
+    const older = await trackWithTaglineChange("older");
+    const newer = await trackWithTaglineChange("newer");
     assert.deepEqual(await summaryService().claimDue(1, []), [String(newer.id)]);
     assert.ok(newer.fetchedAt > older.fetchedAt);
   });
 
   test("timeouts are retried after 1, 5 and 15 minutes, then given up", async () => {
-    const changed = await trackWithPriceChange();
+    const changed = await trackWithTaglineChange();
     const service = summaryService();
     const delays: (number | null)[] = [];
     for (let attempt = 1; attempt <= 4; attempt++) {
@@ -151,7 +173,7 @@ describe("summarising", () => {
   });
 
   test("an LLM failure keeps its error and is retried; a later success replaces it", async () => {
-    const changed = await trackWithPriceChange();
+    const changed = await trackWithTaglineChange();
     const service = summaryService();
     answers.push({ kind: "failed", error: "HTTP 500: injected failure" });
     await service.summarizeSnapshot(String(changed.id));
@@ -172,7 +194,7 @@ describe("summarising", () => {
     ["not a completion", { kind: "malformed", reason: "response did not have the chat completion shape" }, /shape/],
   ] as const) {
     test(`unusable answer (${label}) → unusable_output, not retried`, async () => {
-      const changed = await trackWithPriceChange();
+      const changed = await trackWithTaglineChange();
       answers.push(answer);
       await summaryService().summarizeSnapshot(String(changed.id));
       const stored = await reload(changed.id);
@@ -183,8 +205,8 @@ describe("summarising", () => {
   }
 
   test("daily cap reached → no LLM call, deferred to the next UTC midnight", async () => {
-    const first = await trackWithPriceChange("first");
-    const second = await trackWithPriceChange("second");
+    const first = await trackWithTaglineChange("first");
+    const second = await trackWithTaglineChange("second");
     const service = summaryService(1);
     await service.summarizeSnapshot(String(first.id));
     await service.summarizeSnapshot(String(second.id));
@@ -208,14 +230,14 @@ describe("summarising", () => {
   });
 
   test("a competitor removed before its summary: nothing breaks", async () => {
-    const changed = await trackWithPriceChange();
+    const changed = await trackWithTaglineChange();
     await services.competitorService.stopTracking("acme-crm");
     await summaryService().summarizeSnapshot(String(changed.id));
     assert.equal(prompts.length, 0);
   });
 
   test("an already summarised snapshot is not summarised again", async () => {
-    const changed = await trackWithPriceChange();
+    const changed = await trackWithTaglineChange();
     const service = summaryService();
     await service.summarizeSnapshot(String(changed.id));
     await service.summarizeSnapshot(String(changed.id));
@@ -225,7 +247,7 @@ describe("summarising", () => {
 
 describe("GET /api/competitors/:id/snapshots", () => {
   test("exposes the summary, its status, retry time and the old → new changes", async () => {
-    const changed = await trackWithPriceChange();
+    const changed = await trackWithTaglineChange();
     answers.push({ kind: "timeout" });
     await summaryService().summarizeSnapshot(String(changed.id));
 
@@ -234,6 +256,7 @@ describe("GET /api/competitors/:id/snapshots", () => {
     assert.equal(newest.summaryStatus, "llm_timeout");
     assert.equal(newest.summaryAttempts, 1);
     assert.equal(typeof newest.summaryRetryAt, "string");
-    assert.deepEqual(newest.changes, [{ field: "price", before: "$39/mo", after: "$29/mo" }]);
+    assert.deepEqual(newest.changes, [{ field: "tagline", before: "Simple CRM for small teams", after: "The CRM small teams love" }]);
+    assert.equal(newest.summarySource, null);
   });
 });

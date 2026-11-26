@@ -93,11 +93,11 @@ describe("polling → snapshots → timeline", () => {
       ["ok", false, "first_snapshot", []],
       ["ok", false, "not_changed", []],
       ["partial", false, "incomplete_listing", []],
-      ["ok", true, "pending", ["price"]],
+      ["ok", true, "summarized", ["price"]],
       ["fetch_failed", false, "fetch_failed", []],
-      ["not_found", true, "pending", ["availability"]],
+      ["not_found", true, "summarized", ["availability"]],
       ["not_found", false, "not_found", []],
-      ["ok", true, "pending", ["availability"]],
+      ["ok", true, "summarized", ["availability"]],
     ]);
 
     const [relisted, , , failed, , partial, , first] = rows;

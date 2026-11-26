@@ -51,11 +51,25 @@ export function createSummaryService(deps: SummaryServiceDeps) {
     const attempts = snapshot.summaryAttempts + 1;
     const delayMs = retryDelaysMs[attempts - 1];
     const nextAttemptAt = delayMs === undefined ? null : new Date(now().getTime() + delayMs);
-    return { summaryStatus: status, summary: null, summaryError: error, summaryAttempts: attempts, summaryNextAttemptAt: nextAttemptAt };
+    return {
+      summaryStatus: status,
+      summary: null,
+      summaryError: error,
+      summaryAttempts: attempts,
+      summaryNextAttemptAt: nextAttemptAt,
+      summarySource: null,
+    };
   }
 
   function final(snapshot: Snapshot, status: SummaryStatus, summary: string | null, error: string | null): SummaryUpdate {
-    return { summaryStatus: status, summary, summaryError: error, summaryAttempts: snapshot.summaryAttempts + 1, summaryNextAttemptAt: null };
+    return {
+      summaryStatus: status,
+      summary,
+      summaryError: error,
+      summaryAttempts: snapshot.summaryAttempts + 1,
+      summaryNextAttemptAt: null,
+      summarySource: summary === null ? null : "llm",
+    };
   }
 
   function deferToNextDay(snapshot: Snapshot): SummaryUpdate {
@@ -65,6 +79,7 @@ export function createSummaryService(deps: SummaryServiceDeps) {
       summaryError: null,
       summaryAttempts: snapshot.summaryAttempts,
       summaryNextAttemptAt: nextUtcMidnight(now()),
+      summarySource: null,
     };
   }
 

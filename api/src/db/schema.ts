@@ -37,6 +37,9 @@ export const SUMMARY_STATUSES = [
 ] as const;
 export type SummaryStatus = (typeof SUMMARY_STATUSES)[number];
 
+/** Who wrote a summary: our rules for structured changes, or the LLM for wording changes. */
+export const SUMMARY_SOURCES = ["rule", "llm"] as const;
+
 /** What we know about the competitor at the source, from confirmed answers (200 or 404) only. */
 export const LISTING_STATES = ["unknown", "listed", "never_listed", "delisted"] as const;
 export type ListingState = (typeof LISTING_STATES)[number];
@@ -91,6 +94,7 @@ export const snapshots = pgTable(
     summaryAttempts: integer("summary_attempts").notNull().default(0),
     summaryNextAttemptAt: timestamp("summary_next_attempt_at", { withTimezone: true }),
     summaryError: text("summary_error"),
+    summarySource: text("summary_source", { enum: SUMMARY_SOURCES }),
   },
   (t) => [
     index("snapshots_competitor_fetched_idx").on(t.competitorId, t.fetchedAt.desc()),
