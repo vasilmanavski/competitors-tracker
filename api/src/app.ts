@@ -1,28 +1,23 @@
 import Fastify from "fastify";
-import type { Db } from "./db/client.ts";
-import { sql } from "drizzle-orm";
-import { competitorRepository } from "./competitors/repository.ts";
-import { competitorRoutes } from "./competitors/routes.ts";
+import type { CompetitorService } from "./competitors/service.ts";
+import { registerCompetitorRoutes } from "./competitors/routes.ts";
+import { registerErrorHandler } from "./errors.ts";
+import { registerHealthRoutes } from "./health/routes.ts";
+import type { SnapshotService } from "./snapshots/service.ts";
+import { registerSnapshotRoutes } from "./snapshots/routes.ts";
 
-// Builds the HTTP app without starting it, so tests can call app.inject().
-export function buildApp(deps: { db: Db }, options: { logger?: boolean } = {}) {
+export type AppServices = {
+  competitorService: CompetitorService;
+  snapshotService: SnapshotService;
+  pingDb: () => Promise<void>;
+};
+
+/** Builds the HTTP app without starting it, so tests can call `app.inject()`. */
+export function buildApp(services: AppServices, options: { logger?: boolean } = {}) {
   const app = Fastify({ logger: options.logger ?? true });
-
-  // Served on /health for ops (compose healthcheck, curl) and on /api/health
-  // so the web app can reach it through the same /api proxy as everything else.
-  for (const path of ["/health", "/api/health"]) {
-    app.get(path, async (_request, reply) => {
-      try {
-        await deps.db.execute(sql`select 1`);
-        return { status: "ok", db: "ok" };
-      } catch (err) {
-        app.log.error(err, "health check: database unreachable");
-        return reply.code(503).send({ status: "error", db: "unreachable" });
-      }
-    });
-  }
-
-  competitorRoutes(app, competitorRepository(deps.db));
-
+  registerErrorHandler(app);
+  registerHealthRoutes(app, services.pingDb);
+  registerCompetitorRoutes(app, services.competitorService);
+  registerSnapshotRoutes(app, services.snapshotService);
   return app;
 }

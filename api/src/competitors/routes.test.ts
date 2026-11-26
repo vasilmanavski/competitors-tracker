@@ -5,10 +5,11 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import { sql } from "drizzle-orm";
 import { buildApp } from "../app.ts";
 import { createDb, runMigrations } from "../db/client.ts";
+import { createServices } from "../services.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/competitorpulse_test";
 const { pool, db } = createDb(url);
-const app = buildApp({ db }, { logger: false });
+const app = buildApp(createServices(db), { logger: false });
 
 const post = (body: unknown) => app.inject({ method: "POST", url: "/api/competitors", payload: body as object });
 const list = async () => (await app.inject({ method: "GET", url: "/api/competitors" })).json<{ id: string }[]>();
@@ -18,7 +19,7 @@ before(async () => {
   await runMigrations(db);
 });
 beforeEach(async () => {
-  await db.execute(sql`truncate competitors`);
+  await db.execute(sql`truncate competitors cascade`);
 });
 after(async () => {
   await app.close();

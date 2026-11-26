@@ -1,11 +1,15 @@
-import { CompetitorList } from "./CompetitorList.tsx";
+import { CompetitorList } from "./competitors/CompetitorList.tsx";
+import { useHashRoute } from "./router.ts";
+import { Timeline } from "./timeline/Timeline.tsx";
 
-// Epic 2 adds the timeline view (and a router) next to the list.
 export function App() {
+  const route = useHashRoute();
   return (
-    <main>
-      <h1>CompetitorPulse</h1>
-      <CompetitorList />
+    <main className="card">
+      <h1 className="brand">
+        <a href="#/">CompetitorPulse</a>
+      </h1>
+      {route.view === "list" ? <CompetitorList /> : <Timeline key={route.id} id={route.id} />}
     </main>
   );
 }
