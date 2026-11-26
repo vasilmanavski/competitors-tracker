@@ -18,7 +18,15 @@ export type SummaryStatus =
   | "fetch_failed"
   | "not_found"
   | "incomplete_listing"
-  | "pending";
+  | "pending"
+  | "summarized"
+  | "llm_timeout"
+  | "llm_failed"
+  | "unusable_output"
+  | "daily_cap_reached";
+
+/** One changed field, old → new, as display text. `availability` is listed ↔ not listed. */
+export type FieldChange = { field: string; before: string | null; after: string | null };
 
 export type Snapshot = {
   id: number;
@@ -34,6 +42,10 @@ export type Snapshot = {
   missingFields: string[];
   summary: string | null;
   summaryStatus: SummaryStatus;
+  summaryError: string | null;
+  summaryAttempts: number;
+  summaryRetryAt: string | null;
+  changes: FieldChange[];
   error: string | null;
 };
 

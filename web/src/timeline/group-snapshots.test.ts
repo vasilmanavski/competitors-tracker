@@ -18,6 +18,10 @@ const snapshot = (summaryStatus: SummaryStatus): Snapshot => ({
   missingFields: [],
   summary: null,
   summaryStatus,
+  summaryError: null,
+  summaryAttempts: 0,
+  summaryRetryAt: null,
+  changes: [],
   error: null,
 });
 

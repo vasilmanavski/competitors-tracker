@@ -197,7 +197,7 @@ describe("scheduling", () => {
       maxInFlight: 10,
       tickMs: 20,
       log: silent,
-      poll: async (id) => {
+      runJob: async (id) => {
         polled.push(id);
         if (id === "boom") throw new Error("kaboom");
       },
@@ -219,7 +219,7 @@ describe("scheduling", () => {
       maxInFlight: 2,
       tickMs: 10,
       log: silent,
-      poll: async () => {
+      runJob: async () => {
         peak = Math.max(peak, ++running);
         await sleep(60);
         running--;

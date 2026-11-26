@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { ApiError, listSnapshots, type Snapshot } from "../api.ts";
 import { errorMessage } from "../format.ts";
-import { AWAITING_POLL_REFRESH_MS, IDLE_REFRESH_MS, useAutoRefresh } from "../useAutoRefresh.ts";
+import { AWAITING_REFRESH_MS, IDLE_REFRESH_MS, useAutoRefresh } from "../useAutoRefresh.ts";
 import { mergeSnapshots } from "./snapshot-labels.ts";
 
 const PAGE_SIZE = 200;
@@ -36,8 +36,10 @@ export function useTimeline(id: string) {
     [id],
   );
 
-  const isAwaitingFirstPoll = timeline.state === "ready" && timeline.snapshots.length === 0;
-  useAutoRefresh(refresh, isAwaitingFirstPoll ? AWAITING_POLL_REFRESH_MS : IDLE_REFRESH_MS);
+  const isAwaiting =
+    timeline.state === "ready" &&
+    (timeline.snapshots.length === 0 || timeline.snapshots.some((snapshot) => snapshot.summaryStatus === "pending"));
+  useAutoRefresh(refresh, isAwaiting ? AWAITING_REFRESH_MS : IDLE_REFRESH_MS);
 
   async function loadOlder() {
     const oldest = timeline.state === "ready" ? timeline.snapshots.at(-1) : undefined;

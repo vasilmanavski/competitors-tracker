@@ -72,6 +72,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-not-needed-for-mock}
       LLM_MODEL: ${LLM_MODEL:-mock-model}
       LLM_DAILY_CAP: ${LLM_DAILY_CAP:-2000}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-10000}
     ports:
       - "3000:3000"
     depends_on:

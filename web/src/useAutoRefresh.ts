@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
-/** Re-check interval while something is waiting for its first poll (polled within ~1 s of being added). */
-export const AWAITING_POLL_REFRESH_MS = 1_000;
+/** Re-check interval while background work the user is watching is about to land (a first poll, a summary). */
+export const AWAITING_REFRESH_MS = 1_000;
 
 /** Re-check interval otherwise: new polls only arrive once per poll interval per competitor. */
 export const IDLE_REFRESH_MS = 15_000;

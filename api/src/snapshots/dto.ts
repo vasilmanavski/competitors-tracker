@@ -22,6 +22,10 @@ export function toSnapshotDto(snapshot: Snapshot) {
     missingFields: snapshot.missingFields,
     summary: snapshot.summary,
     summaryStatus: snapshot.summaryStatus,
+    summaryError: snapshot.summaryError,
+    summaryAttempts: snapshot.summaryAttempts,
+    summaryRetryAt: snapshot.summaryNextAttemptAt?.toISOString() ?? null,
+    changes: snapshot.changes,
     error: snapshot.error,
   };
 }

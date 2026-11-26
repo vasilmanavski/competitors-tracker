@@ -33,16 +33,16 @@ When a snapshot has `changed: true`, produce a short plain-English summary for a
 |---|---|---|
 | 3.1 | **No money spent.** Use the provided mock LLM (`files/mock-llm/mock-llm-server.py`, OpenAI Chat Completions shape). The client is OpenAI-compatible with configurable `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, so Ollama or a real provider is just a config change. | **DECIDED** |
 | 3.2 | No fine-tuning. | **DECIDED** |
-| 3.3 | The snapshot is saved by Epic 2 **before** any LLM work. The LLM step only updates `summary` / `summary_status`, so a poll is never lost. | **PROPOSED** |
-| 3.4 | Only the changed fields (old → new) are sent to the LLM, never the raw source JSON. | **PROPOSED** |
-| 3.5 | The daily cap is counted in the database (it survives restarts) and claimed atomically before each call. | **PROPOSED** |
-| 3.6 | **Deterministic vs LLM summaries**: e.g. a price change could be summarised without the LLM ("Price: $39/mo → $29/mo"). Options: hybrid fallback / deterministic-first / LLM only. | **OPEN**, decide at epic start |
-| 3.7 | The LLM call runs inline after the poll, or in a separate worker that picks up `pending` snapshots (the worker survives crashes and keeps polling fast). | **OPEN** |
-| 3.8 | What a "usable" response is (length, plain text, non-empty). Note: the mock echoes its input. | **OPEN** |
-| 3.9 | Retry policy for failed / timed-out / cap-reached summaries (retry later? next day? never?). | **OPEN** |
+| 3.3 | The snapshot is saved by Epic 2 **before** any LLM work. The LLM step only updates the summary columns, so a poll is never lost. | **DECIDED** (implemented) |
+| 3.4 | Only the changed fields (old → new) are sent to the LLM, never the raw source JSON. Values are quoted and the system prompt says to treat them as data (they come from a third-party site). The changes come first in the message, so the mock's 160-char echo shows them. | **DECIDED** (implemented) |
+| 3.5 | The daily cap is counted in the database (`llm_usage`, one row per UTC day) and claimed atomically before each call (`INSERT … ON CONFLICT DO UPDATE … WHERE calls < cap`). Every HTTP call counts, including failed ones. | **DECIDED** (implemented) |
+| 3.6 | **Hybrid: every change always shows its old → new values** (computed by us at poll time, stored as `snapshots.changes`). The AI summary sits on top when there is one. `summary` stays LLM-only. | **DECIDED** 2026-11-26 |
+| 3.7 | **Separate worker.** A poll stores a change as `pending` with `summary_next_attempt_at = now`. A second scheduler (same claim/`SKIP LOCKED` pattern, 4 in flight, newest change first, 120 s lease) summarises due snapshots. A slow LLM never delays polling, and pending work survives restarts. | **DECIDED** 2026-11-26 |
+| 3.8 | **Usable** = non-empty after collapsing whitespace, `finish_reason` is `stop` (or absent), ≤ 600 characters, not JSON or a code block. A 200 that isn't a chat completion is also `unusable_output`. | **DECIDED** 2026-11-26 |
+| 3.9 | Timeout / LLM error → retried after 1, 5 and 15 min (4 attempts in all), then final. Cap reached → `daily_cap_reached`, no call made, retried after the next UTC midnight (newest first). Unusable → final, not retried. | **DECIDED** 2026-11-26 |
 
 ## Summary statuses the UI must explain (draft)
-`ok` · `pending` · `llm_timeout` · `llm_failed` · `unusable_output` · `daily_cap_reached`, plus the Epic 2 ones: `first_snapshot`, `not_changed`, `fetch_failed`, `not_found`, `incomplete_listing`.
+`summarized` (named so instead of `ok`, to avoid confusion with the snapshot status `ok`) · `pending` · `llm_timeout` · `llm_failed` · `unusable_output` · `daily_cap_reached`, plus the Epic 2 ones: `first_snapshot`, `not_changed`, `fetch_failed`, `not_found`, `incomplete_listing`.
 
 ## Failure modes
 | Situation | Result |
@@ -53,7 +53,18 @@ When a snapshot has `changed: true`, produce a short plain-English summary for a
 | Daily cap reached | snapshot kept, `daily_cap_reached` (+ fallback text if 3.6 says so) |
 
 ## Stories
-_To be derived when this epic starts._
+_Implemented 2026-11-26 on `epic-3-summaries`._
+
+1. **Schema** (`api/drizzle/0003_summaries.sql`): `snapshots` gets `changes jsonb`, `summary_attempts`, `summary_next_attempt_at` (partial index where not null, the worker's queue), `summary_error`; new summary statuses; new table `llm_usage(day, calls)`. Existing `pending` rows are queued by the migration.
+2. **Old → new at poll time** (`listings/field-changes.ts`, pure): the changed fields become `{field, before, after}` display pairs, `availability` = listed ↔ not listed. `SnapshotService.recordPoll` stores them and queues the change.
+3. **Prompt + usability check** (`summaries/prompt.ts`, `summaries/summary-check.ts`, pure).
+4. **LLM client** (`summaries/llm-client.ts`): any OpenAI-compatible endpoint, one request, `LLM_TIMEOUT_MS` (10 s), returns `answer | timeout | failed | malformed`; only a shutdown abort throws.
+5. **Cap** (`summaries/repository.ts`): `incrementCallsIfBelow(cap)`, one atomic statement.
+6. **Summary service + worker** (`summaries/service.ts`, wired in `main.ts`): claim → cap → call → store summary or retry plan. The scheduler is now generic (`runJob`) and runs both polls and summaries.
+7. **API**: snapshots add `changes`, `summaryError`, `summaryAttempts`, `summaryRetryAt`.
+8. **UI** (`timeline/ChangeSummary.tsx`): every change shows its old → new values, then the AI summary, a "Writing an AI summary…" spinner, or a "No AI summary" box saying why and when it will be retried. The timeline refreshes every second while a summary is pending.
+
+**Tests:** prompt, usability check, field changes (unit); LLM client against a fake server (ok, 500, timeout, malformed, cut off, unreachable, abort); summaries integration on Postgres (queueing, newest first, lease, retries 1/5/15 min then give up, failure then success, unusable, cap reached, cap under 10 concurrent claims, cap 0, competitor removed, no double summary, API fields).
 
 ## Verification (mock LLM control endpoints, `localhost:4001`)
 ```bash
@@ -64,6 +75,12 @@ curl -X POST localhost:4001/control/reset
 ```
 - Unchanged polls → `callCount` doesn't grow.
 - With `LLM_DAILY_CAP=1` → the second change shows `daily_cap_reached`.
+
+**Results (2026-11-26, local, provided source + mock LLM, poll interval 2 s):**
+- 8 s of unchanged polls → mock `callCount` 0. `advance acme-crm` → one call, `summarized`, prompt starts `Price: "$39/mo" → "$29/mo"`.
+- `failNext: 1` → `llm_failed` with `HTTP 500: … injected failure`, retry 1 min later; retry made due → `summarized`.
+- `latencyMs: 20000` → `pending` while waiting; meanwhile polls kept landing every 2 s and `GET /api/competitors` answered in 4 ms; after 10 s → `llm_timeout`, retry scheduled.
+- `LLM_DAILY_CAP=1` → the second change: `daily_cap_reached`, no call (`callCount` stayed 1), retry at next UTC midnight.
 
 ## Decision log → README
 - Which LLM was used (the mock) and how to configure a real one.
