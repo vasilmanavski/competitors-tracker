@@ -6,7 +6,9 @@
     "dev": "node --env-file-if-exists=.env --watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migration": "drizzle-kit generate --custom"
+    "db:migration": "drizzle-kit generate --custom",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "test:db": "createdb competitorpulse_test 2>/dev/null || true"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",

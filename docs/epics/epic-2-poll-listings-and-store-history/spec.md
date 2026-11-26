@@ -25,6 +25,7 @@ This is the epic the graders weigh most: **persistence + scheduling**.
 - `GET /api/competitors/:id/snapshots` (newest first).
 - React **Competitor timeline** view.
 - The "changed in last 24 h" indicator on the competitor list (moved here from Epic 1).
+- A "never found at source" status on the competitor list, for ids whose polls have only ever returned `not_found`. This is the follow-up to decision 1.2: typos like `qweqweqweqeqe` are accepted on add and flagged here.
 
 ## Out of scope
 - The LLM call (Epic 3). In this epic `summary` is always `null`, with a reason.
