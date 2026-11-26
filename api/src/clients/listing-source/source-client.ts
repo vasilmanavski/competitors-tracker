@@ -26,7 +26,6 @@ export type SourceClientOptions = {
   /** Stops one poll from waiting on 429s forever. */
   max429Retries?: number;
   maxRetryAfterMs?: number;
-  fetchImpl?: typeof fetch;
 };
 
 /** Fetches listings from the source; every failure comes back as a value, never as an exception. */
@@ -91,7 +90,7 @@ function describeAttempts(errors: string[]): string {
 
 /** Creates the HTTP client for `GET {baseUrl}/listings/:id`. */
 export function createSourceClient(options: SourceClientOptions): SourceClient {
-  const { limiter, timeoutMs, maxRetries, fetchImpl = fetch } = options;
+  const { limiter, timeoutMs, maxRetries } = options;
   const backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
   const max429Retries = options.max429Retries ?? DEFAULT_MAX_429_RETRIES;
   const maxRetryAfterMs = options.maxRetryAfterMs ?? DEFAULT_MAX_RETRY_AFTER_MS;
@@ -102,7 +101,7 @@ export function createSourceClient(options: SourceClientOptions): SourceClient {
     const url = new URL(`listings/${encodeURIComponent(id)}`, baseUrl);
     const timeout = AbortSignal.timeout(timeoutMs);
     try {
-      const res = await fetchImpl(url, {
+      const res = await fetch(url, {
         headers: { accept: "application/json" },
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });

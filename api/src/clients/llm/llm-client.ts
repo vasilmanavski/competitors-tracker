@@ -16,7 +16,6 @@ export type LlmClientOptions = {
   model: string;
   timeoutMs: number;
   maxTokens?: number;
-  fetchImpl?: typeof fetch;
 };
 
 export type LlmClient = {
@@ -76,14 +75,14 @@ function describeNetworkError(err: unknown): string {
  * Ollama, ...). One request per call, no retries: retrying is the caller's policy.
  */
 export function createLlmClient(options: LlmClientOptions): LlmClient {
-  const { apiKey, model, timeoutMs, maxTokens = DEFAULT_MAX_TOKENS, fetchImpl = fetch } = options;
+  const { apiKey, model, timeoutMs, maxTokens = DEFAULT_MAX_TOKENS } = options;
   const url = new URL("chat/completions", options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`);
 
   return {
     async complete(messages, signal) {
       const timeout = AbortSignal.timeout(timeoutMs);
       try {
-        const res = await fetchImpl(url, {
+        const res = await fetch(url, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
           body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: TEMPERATURE }),
