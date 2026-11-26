@@ -24,7 +24,7 @@ export function Timeline({ id }: { id: string }) {
         </p>
       )}
       {timeline.state === "ready" && timeline.snapshots.length === 0 && (
-        <p className="muted">No polls yet. The first one runs within a few seconds of adding a competitor. This page refreshes itself.</p>
+        <p className="muted">Waiting for the first poll…</p>
       )}
       {timeline.state === "ready" && timeline.snapshots.length > 0 && (
         <>

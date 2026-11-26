@@ -1,11 +1,9 @@
 import { useCallback, useState } from "react";
 import { listCompetitors, removeCompetitor, type Competitor } from "../api.ts";
 import { errorMessage } from "../format.ts";
-import { useAutoRefresh } from "../useAutoRefresh.ts";
+import { AWAITING_POLL_REFRESH_MS, IDLE_REFRESH_MS, useAutoRefresh } from "../useAutoRefresh.ts";
 import { AddCompetitorForm } from "./AddCompetitorForm.tsx";
 import { CompetitorRow } from "./CompetitorRow.tsx";
-
-const REFRESH_MS = 15_000;
 
 type ListState =
   | { state: "loading" }
@@ -27,7 +25,9 @@ export function CompetitorList() {
     }
   }, []);
 
-  useAutoRefresh(refresh, REFRESH_MS);
+  const isAwaitingFirstPoll =
+    list.state === "ready" && list.competitors.some((competitor) => competitor.lastPolledAt === null);
+  useAutoRefresh(refresh, isAwaitingFirstPoll ? AWAITING_POLL_REFRESH_MS : IDLE_REFRESH_MS);
 
   async function remove(id: string) {
     setRowError(null);
