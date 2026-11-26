@@ -49,6 +49,20 @@ function parseCompletion(text: string): CompletionResult {
   return { kind: "answer", content: choice?.message.content ?? null, finishReason: choice?.finish_reason ?? null };
 }
 
+const ErrorBody = z.object({ error: z.object({ message: z.string() }) });
+
+/** "HTTP 500: <provider message>" from an OpenAI-style error body, else the start of the raw body. */
+function describeHttpError(status: number, text: string): string {
+  let detail = text.slice(0, MAX_ERROR_BODY_CHARS);
+  try {
+    const parsed = ErrorBody.safeParse(JSON.parse(text));
+    if (parsed.success) detail = parsed.data.error.message;
+  } catch {
+    // not JSON: keep the raw start of the body
+  }
+  return detail.trim() === "" ? `HTTP ${status}` : `HTTP ${status}: ${detail}`;
+}
+
 function describeNetworkError(err: unknown): string {
   if (!(err instanceof Error)) return `network error: ${String(err)}`;
   const cause = err.cause as { code?: unknown } | undefined;
@@ -74,7 +88,7 @@ export function createLlmClient(options: LlmClientOptions): LlmClient {
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
         const text = await res.text();
-        if (!res.ok) return { kind: "failed", error: `HTTP ${res.status}: ${text.slice(0, MAX_ERROR_BODY_CHARS)}` };
+        if (!res.ok) return { kind: "failed", error: describeHttpError(res.status, text) };
         return parseCompletion(text);
       } catch (err) {
         if (signal?.aborted) throw err;

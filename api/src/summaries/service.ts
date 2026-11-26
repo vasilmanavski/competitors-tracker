@@ -1,8 +1,8 @@
 import type { DataAccess } from "../data-access.ts";
 import type { SummaryStatus } from "../db/schema.ts";
 import type { ChangedField } from "../listings/change-detection.ts";
-import type { FieldChange } from "../listings/field-changes.ts";
-import type { Snapshot, SummaryUpdate } from "../snapshots/repository.ts";
+import { type DisplayListing, type FieldChange, toDisplayListing } from "../listings/field-changes.ts";
+import { priceOf, type Snapshot, type SummaryUpdate } from "../snapshots/repository.ts";
 import type { CompletionResult, LlmClient } from "./llm-client.ts";
 import { buildSummaryPrompt } from "./prompt.ts";
 import { checkSummary } from "./summary-check.ts";
@@ -40,6 +40,11 @@ export function nextUtcMidnight(now: Date): Date {
 function changesForPrompt(snapshot: Snapshot): FieldChange[] {
   if (snapshot.changes.length > 0) return snapshot.changes;
   return snapshot.changedFields.map((field) => ({ field: field as ChangedField, before: null, after: null }));
+}
+
+function currentListingOf(snapshot: Snapshot): DisplayListing | null {
+  if (snapshot.status !== "ok" && snapshot.status !== "partial") return null;
+  return toDisplayListing({ ...snapshot, price: priceOf(snapshot) });
 }
 
 /** Generates and stores AI summaries for changed snapshots, within the daily cap. */
@@ -102,7 +107,12 @@ export function createSummaryService(deps: SummaryServiceDeps) {
 
   async function requestSummary(snapshot: Snapshot, signal?: AbortSignal): Promise<SummaryUpdate> {
     if (!(await llmUsageRepository.incrementCallsIfBelow(dailyCap))) return deferToNextDay(snapshot);
-    const prompt = buildSummaryPrompt({ competitorId: snapshot.competitorId, title: snapshot.title, changes: changesForPrompt(snapshot) });
+    const prompt = buildSummaryPrompt({
+      competitorId: snapshot.competitorId,
+      title: snapshot.title,
+      changes: changesForPrompt(snapshot),
+      currentListing: currentListingOf(snapshot),
+    });
     return updateFor(snapshot, await llm.complete(prompt, signal));
   }
 

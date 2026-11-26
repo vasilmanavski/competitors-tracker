@@ -46,14 +46,20 @@ describe("LLM client", () => {
     assert.equal((lastRequest.body as { model: string }).model, "test-model");
   });
 
-  test("5xx → failed with the status and body", async () => {
+  test("5xx with an OpenAI-style error body → failed with the provider's message", async () => {
     respond = (_req, res) => {
       res.writeHead(500, { "content-type": "application/json" });
       res.end('{"error":{"message":"injected failure"}}');
     };
-    const result = await client().complete(messages);
-    assert.equal(result.kind, "failed");
-    assert.match(result.kind === "failed" ? result.error : "", /^HTTP 500: .*injected failure/);
+    assert.deepEqual(await client().complete(messages), { kind: "failed", error: "HTTP 500: injected failure" });
+  });
+
+  test("5xx with a non-JSON body → failed with the start of the body", async () => {
+    respond = (_req, res) => {
+      res.writeHead(502, { "content-type": "text/html" });
+      res.end("<html>Bad Gateway</html>");
+    };
+    assert.deepEqual(await client().complete(messages), { kind: "failed", error: "HTTP 502: <html>Bad Gateway</html>" });
   });
 
   test("slower than the timeout → timeout", async () => {

@@ -131,7 +131,17 @@ describe("summarising", () => {
     assert.equal(prompts.length, 1);
     assert.equal(
       prompts[0]?.at(-1)?.content,
-      'Old tagline: "Simple CRM for small teams"\nNew tagline: "The CRM small teams love"\nCompetitor: Acme CRM (acme-crm).',
+      [
+        'Old tagline: "Simple CRM for small teams"',
+        'New tagline: "The CRM small teams love"',
+        "Competitor: Acme CRM (acme-crm).",
+        "",
+        "Current listing, for context only:",
+        'Title: "Acme CRM"',
+        'Tagline: "The CRM small teams love"',
+        'Price: "$39/mo"',
+        'Description: "Track leads & deals in one place."',
+      ].join("\n"),
     );
     assert.equal(await llmUsageRepository.findCallsToday(), 1);
   });
