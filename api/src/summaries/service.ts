@@ -15,7 +15,7 @@ export type SummaryLogger = {
 const MINUTE_MS = 60_000;
 
 /** Waits before retrying a timed-out or failed summary; its length is the number of retries. */
-export const DEFAULT_RETRY_DELAYS_MS = [1 * MINUTE_MS, 5 * MINUTE_MS, 15 * MINUTE_MS];
+export const DEFAULT_RETRY_DELAYS_MS = [MINUTE_MS, 5 * MINUTE_MS, 15 * MINUTE_MS];
 
 /** How long a claimed snapshot stays reserved; longer than any LLM call. */
 const CLAIM_LEASE_SECONDS = 120;

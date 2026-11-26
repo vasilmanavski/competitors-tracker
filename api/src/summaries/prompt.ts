@@ -5,12 +5,12 @@ export type ChatMessage = { role: "system" | "user"; content: string };
 
 const MAX_VALUE_CHARS = 500;
 
-const FIELD_LABELS: Record<FieldChange["field"], string> = {
-  title: "Title",
-  tagline: "Tagline",
-  price: "Price",
-  description: "Description",
-  availability: "Availability",
+const FIELD_NAMES: Record<FieldChange["field"], string> = {
+  title: "title",
+  tagline: "tagline",
+  price: "price",
+  description: "description",
+  availability: "availability",
 };
 
 const SYSTEM_PROMPT = [
@@ -26,8 +26,10 @@ function quote(value: string | null): string {
   return JSON.stringify(clipped);
 }
 
+/** Each value on its own labelled line: small models misread or invent values in an inline "a → b". */
 function describeChange(change: FieldChange): string {
-  return `${FIELD_LABELS[change.field]}: ${quote(change.before)} → ${quote(change.after)}`;
+  const name = FIELD_NAMES[change.field];
+  return `Old ${name}: ${quote(change.before)}\nNew ${name}: ${quote(change.after)}`;
 }
 
 /**
@@ -36,10 +38,10 @@ function describeChange(change: FieldChange): string {
  * the start of it sees what changed.
  */
 export function buildSummaryPrompt(input: { competitorId: string; title: string | null; changes: FieldChange[] }): ChatMessage[] {
-  const changes = input.changes.map(describeChange).join("; ");
+  const changes = input.changes.map(describeChange).join("\n");
   const product = input.title ? `${input.title} (${input.competitorId})` : input.competitorId;
   return [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: `${changes}. Competitor: ${product}.` },
+    { role: "user", content: `${changes}\nCompetitor: ${product}.` },
   ];
 }
