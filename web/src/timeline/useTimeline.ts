@@ -4,7 +4,7 @@ import { errorMessage } from "../format.ts";
 import { AWAITING_POLL_REFRESH_MS, IDLE_REFRESH_MS, useAutoRefresh } from "../useAutoRefresh.ts";
 import { mergeSnapshots } from "./snapshot-labels.ts";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 200;
 
 export type TimelineState =
   | { state: "loading" }
