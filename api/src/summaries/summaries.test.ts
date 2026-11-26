@@ -7,8 +7,7 @@ import { createDb, runMigrations } from "../db/client.ts";
 import type { PollOutcome } from "../listings/change-detection.ts";
 import { normalizeListing } from "../listings/normalize.ts";
 import { createServices } from "../services.ts";
-import type { CompletionResult, LlmClient } from "./llm-client.ts";
-import type { ChatMessage } from "./prompt.ts";
+import type { ChatMessage, CompletionResult, LlmClient } from "../clients/llm/llm-client.ts";
 import { createSummaryService, nextUtcMidnight } from "./service.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/competitorpulse_test";

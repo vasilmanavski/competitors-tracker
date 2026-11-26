@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 import { buildApp } from "../app.ts";
 import { createDb, runMigrations } from "../db/client.ts";
 import { createServices } from "../services.ts";
-import type { FetchResult, SourceClient } from "../source/source-client.ts";
+import type { FetchResult, SourceClient } from "../clients/listing-source/source-client.ts";
 import { createPollingService } from "./service.ts";
 import { createScheduler } from "./scheduler.ts";
 
