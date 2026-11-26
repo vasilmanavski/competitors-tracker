@@ -7,17 +7,15 @@ export function Timeline({ id }: { id: string }) {
 
   return (
     <section>
-      <p>
-        <a href="#/">← All competitors</a>
-      </p>
-      <h2>
-        Timeline: <code>{id}</code>
-      </h2>
+      <a href="#/" className="button">
+        ← Back to competitors
+      </a>
+      <h2 className="timeline-title">{id}</h2>
 
       {timeline.state === "loading" && <p>Loading history…</p>}
       {timeline.state === "not_tracked" && (
         <p role="alert">
-          <code>{id}</code> is not tracked (it may have been removed). <a href="#/">Back to the list</a>
+          {id} is not tracked (it may have been removed). <a href="#/">Back to the list</a>
         </p>
       )}
       {timeline.state === "error" && (
@@ -26,7 +24,7 @@ export function Timeline({ id }: { id: string }) {
         </p>
       )}
       {timeline.state === "ready" && timeline.snapshots.length === 0 && (
-        <p>No polls yet. The first one runs within a few seconds of adding a competitor. This page refreshes itself.</p>
+        <p className="muted">No polls yet. The first one runs within a few seconds of adding a competitor. This page refreshes itself.</p>
       )}
       {timeline.state === "ready" && timeline.snapshots.length > 0 && (
         <>
@@ -36,7 +34,7 @@ export function Timeline({ id }: { id: string }) {
             ))}
           </ol>
           {timeline.hasOlder && (
-            <button onClick={() => void loadOlder()} disabled={loadingOlder}>
+            <button className="load-older" onClick={() => void loadOlder()} disabled={loadingOlder}>
               {loadingOlder ? "Loading…" : "Load older"}
             </button>
           )}

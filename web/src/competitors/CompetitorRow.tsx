@@ -13,11 +13,29 @@ const NEVER_FOUND_HINT = "Every answer from the source so far was 404. Check the
 
 function LastPoll({ competitor }: { competitor: Competitor }) {
   const { lastPolledAt, lastStatus } = competitor;
-  if (!lastPolledAt || !lastStatus) return <span className="muted">not polled yet</span>;
+  if (!lastPolledAt || !lastStatus) return <span className="competitor-meta muted">not polled yet</span>;
   return (
-    <span className="muted" title={absoluteTime(lastPolledAt)}>
-      last poll {relativeTime(lastPolledAt)}: {STATUS_LABELS[lastStatus]}
+    <span className="competitor-meta muted" title={absoluteTime(lastPolledAt)}>
+      last poll {relativeTime(lastPolledAt)} · {STATUS_LABELS[lastStatus]}
     </span>
+  );
+}
+
+function Badges({ competitor }: { competitor: Competitor }) {
+  const { changedLast24h, lastChangedAt, neverFound } = competitor;
+  return (
+    <>
+      {changedLast24h && (
+        <span className="badge badge--changed" title={lastChangedAt ? absoluteTime(lastChangedAt) : undefined}>
+          changed in last 24 h
+        </span>
+      )}
+      {neverFound && (
+        <span className="badge badge--warning" title={NEVER_FOUND_HINT}>
+          never found at source
+        </span>
+      )}
+    </>
   );
 }
 
@@ -29,32 +47,22 @@ type CompetitorRowProps = {
 
 /** One competitor: link to its timeline, status badges, last poll and a remove button. */
 export function CompetitorRow({ competitor, error, onRemove }: CompetitorRowProps) {
-  const { id, changedLast24h, lastChangedAt, neverFound } = competitor;
+  const { id } = competitor;
   return (
     <li className="competitor-row">
-      <a href={timelineHref(id)}>
-        <code>{id}</code>
-      </a>{" "}
-      {changedLast24h && (
-        <strong className="changed-badge" title={lastChangedAt ? absoluteTime(lastChangedAt) : undefined}>
-          ● changed in last 24 h
-        </strong>
-      )}{" "}
-      {neverFound && (
-        <strong className="warning-badge" title={NEVER_FOUND_HINT}>
-          ⚠ never found at source
-        </strong>
-      )}{" "}
-      <LastPoll competitor={competitor} />{" "}
+      <div className="competitor-main">
+        <a href={timelineHref(id)}>{id}</a>
+        <Badges competitor={competitor} />
+        <LastPoll competitor={competitor} />
+        {error && (
+          <span role="alert" className="competitor-meta error">
+            {error}
+          </span>
+        )}
+      </div>
       <button onClick={() => onRemove(id)} aria-label={`Remove ${id}`}>
         Remove
       </button>
-      {error && (
-        <span role="alert" className="error">
-          {" "}
-          {error}
-        </span>
-      )}
     </li>
   );
 }

@@ -6,7 +6,7 @@ export function noSummaryReason(snapshot: Snapshot): string {
     case "first_snapshot":
       return "First snapshot, nothing to compare with yet.";
     case "not_changed":
-      return "No change since the previous listing.";
+      return "No change since previous snapshot.";
     case "fetch_failed":
       return `Fetch failed: ${snapshot.error ?? "unknown error"}. The last good listing stays the baseline.`;
     case "not_found":

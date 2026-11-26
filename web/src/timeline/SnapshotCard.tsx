@@ -1,61 +1,66 @@
-import type { Snapshot } from "../api.ts";
+import type { ReactNode } from "react";
+import type { Snapshot, SnapshotStatus } from "../api.ts";
 import { absoluteTime, relativeTime } from "../format.ts";
 import { changeLabel, noSummaryReason } from "./snapshot-labels.ts";
 
 type FieldName = "title" | "tagline" | "price" | "description";
-const FIELDS: FieldName[] = ["title", "tagline", "price", "description"];
 
-function FieldRow({ name, snapshot }: { name: FieldName; snapshot: Snapshot }) {
+const PROBLEM_STATUS_LABELS: Record<Exclude<SnapshotStatus, "ok">, string> = {
+  partial: "incomplete listing",
+  not_found: "not listed",
+  fetch_failed: "fetch failed",
+};
+
+function Field({ name, snapshot, children }: { name: FieldName; snapshot: Snapshot; children?: ReactNode }) {
   const value = snapshot[name];
-  const isChanged = snapshot.changedFields.includes(name);
-  const isMissing = snapshot.missingFields.includes(name);
-  return (
-    <tr>
-      <th>{name}</th>
-      <td className={isChanged ? "field--changed" : undefined}>
-        {value ?? <em className="muted">{isMissing ? "missing in this response" : "—"}</em>}
-      </td>
-    </tr>
-  );
+  if (value === null) return <span className="muted">({name} missing)</span>;
+  const className = snapshot.changedFields.includes(name) ? "field--changed" : undefined;
+  return <span className={className}>{children ?? value}</span>;
 }
 
-function Summary({ snapshot }: { snapshot: Snapshot }) {
-  if (snapshot.summary) {
-    return (
-      <p className="snapshot-summary">
-        <strong>Summary:</strong> {snapshot.summary}
+function Listing({ snapshot }: { snapshot: Snapshot }) {
+  return (
+    <div className="snapshot-listing">
+      <p>
+        <Field name="title" snapshot={snapshot}>
+          <strong>{snapshot.title}</strong>
+        </Field>
+        {" — "}
+        <Field name="tagline" snapshot={snapshot} />
       </p>
-    );
-  }
-  return (
-    <p className="snapshot-summary muted">
-      <strong>No summary:</strong> {noSummaryReason(snapshot)}
-    </p>
+      <p>
+        <Field name="price" snapshot={snapshot} />
+      </p>
+      <p>
+        <Field name="description" snapshot={snapshot} />
+      </p>
+    </div>
   );
 }
 
-/** One poll in the timeline: when, its status, the listing fields and the summary (or why there is none). */
-export function SnapshotCard({ snapshot }: { snapshot: Snapshot }) {
+function Header({ snapshot }: { snapshot: Snapshot }) {
   const label = changeLabel(snapshot);
+  return (
+    <div className="snapshot-time">
+      <span title={relativeTime(snapshot.fetchedAt)}>{absoluteTime(snapshot.fetchedAt)}</span>
+      {label && <span className="badge badge--changed">{label}</span>}
+      {snapshot.status !== "ok" && <span className="badge badge--muted">{PROBLEM_STATUS_LABELS[snapshot.status]}</span>}
+    </div>
+  );
+}
+
+/** One poll in the timeline: when, the listing as fetched, and the summary or why there is none. */
+export function SnapshotCard({ snapshot }: { snapshot: Snapshot }) {
   const hasListing = snapshot.status === "ok" || snapshot.status === "partial";
   return (
     <li className={snapshot.changed ? "snapshot snapshot--changed" : "snapshot"}>
-      <div>
-        <strong title={snapshot.fetchedAt}>{absoluteTime(snapshot.fetchedAt)}</strong>{" "}
-        <span className="muted">({relativeTime(snapshot.fetchedAt)})</span>{" "}
-        <span className={`status--${snapshot.status}`}>[{snapshot.status}]</span>{" "}
-        {label && <strong className="changed-badge">{label}</strong>}
-      </div>
-      {hasListing && (
-        <table className="snapshot-fields">
-          <tbody>
-            {FIELDS.map((name) => (
-              <FieldRow key={name} name={name} snapshot={snapshot} />
-            ))}
-          </tbody>
-        </table>
+      <Header snapshot={snapshot} />
+      {hasListing && <Listing snapshot={snapshot} />}
+      {snapshot.summary ? (
+        <p className="snapshot-summary">{snapshot.summary}</p>
+      ) : (
+        <p className="snapshot-reason">{noSummaryReason(snapshot)}</p>
       )}
-      <Summary snapshot={snapshot} />
     </li>
   );
 }

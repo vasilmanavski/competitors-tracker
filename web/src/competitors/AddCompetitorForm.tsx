@@ -25,19 +25,19 @@ export function AddCompetitorForm({ onAdded }: { onAdded: () => Promise<void> })
 
   return (
     <form onSubmit={submit}>
-      <label>
-        Competitor id{" "}
+      <div className="add-form">
         <input
           value={id}
           onChange={(event) => setId(event.target.value)}
-          placeholder="e.g. acme-crm"
+          placeholder="competitor id, e.g. acme-crm"
+          aria-label="Competitor id"
           aria-invalid={error !== null}
           aria-describedby="add-error"
         />
-      </label>{" "}
-      <button type="submit" disabled={submitting || id.trim() === ""}>
-        {submitting ? "Adding…" : "Add"}
-      </button>
+        <button type="submit" disabled={submitting || id.trim() === ""}>
+          {submitting ? "Tracking…" : "Track"}
+        </button>
+      </div>
       {error && (
         <p id="add-error" role="alert" className="error">
           {error}

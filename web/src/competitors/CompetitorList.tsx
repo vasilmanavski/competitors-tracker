@@ -41,7 +41,6 @@ export function CompetitorList() {
 
   return (
     <section>
-      <h2>Competitors</h2>
       <AddCompetitorForm onAdded={refresh} />
 
       {list.state === "loading" && <p>Loading competitors…</p>}
@@ -50,9 +49,9 @@ export function CompetitorList() {
           Could not load competitors: {list.message} <button onClick={() => void refresh()}>Retry</button>
         </p>
       )}
-      {list.state === "ready" && list.competitors.length === 0 && <p>No competitors tracked yet. Add one above.</p>}
+      {list.state === "ready" && list.competitors.length === 0 && <p className="muted">No competitors tracked yet. Add one above.</p>}
       {list.state === "ready" && list.competitors.length > 0 && (
-        <ul>
+        <ul className="competitor-list">
           {list.competitors.map((competitor) => (
             <CompetitorRow
               key={competitor.id}
