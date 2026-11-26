@@ -52,7 +52,7 @@ A README that meets every deliverable in the brief and answers "these numbers do
 | 4.5 | **Retention: keep the changes, expire the noise** (option 3 of three discussed). Uneventful snapshots (not `changed`, not `first_snapshot`) older than `SNAPSHOT_RETENTION_DAYS` (default 90) are purged by an hourly job (also at startup), 5,000 rows per statement. Kept for good: changes, first snapshots, and each competitor's **latest complete (`ok`) listing however old**, because it's the change-detection baseline (otherwise a competitor delisted > 90 days returns as a "first snapshot"). Rejected: delete everything > 90 days (loses change history, can break detection); keep everything (unbounded). Partitioning is described, not built. | **DECIDED** 2026-11-26 |
 
 ## Final Docker check (deferred from Epics 1–3)
-Epics 1–3 are verified locally only (dev laptop has no Docker). Before submitting, on the personal laptop:
+Epics 1–4 are verified locally only (dev laptop has no Docker). **Status: still to do.** Epic 4 was merged before this check (decided 2026-11-26); run it on the personal laptop before submitting:
 - [ ] `docker compose up --build` on a fresh clone → all 5 services healthy
 - [ ] The API container applies every migration (`0000_init` … latest) on startup
 - [ ] Web on `:8080`: add / list / remove a competitor through nginx (POST and DELETE proxied, not just GET)
