@@ -130,7 +130,7 @@ describe("summarising", () => {
     assert.equal(stored.summaryNextAttemptAt, null);
     assert.equal(prompts.length, 1);
     assert.equal(
-      prompts[0]?.[1]?.content,
+      prompts[0]?.at(-1)?.content,
       'Old tagline: "Simple CRM for small teams"\nNew tagline: "The CRM small teams love"\nCompetitor: Acme CRM (acme-crm).',
     );
     assert.equal(await llmUsageRepository.findCallsToday(), 1);
