@@ -1,7 +1,8 @@
+import { shortTime } from "../format.ts";
 import type { Snapshot } from "../api.ts";
 
-/** Why a snapshot has no summary, in words the user understands. */
-export function noSummaryReason(snapshot: Snapshot): string {
+/** Why a poll has nothing to summarise, or null when it is a change (see `summaryNotice`). */
+export function noSummaryReason(snapshot: Snapshot): string | null {
   switch (snapshot.summaryStatus) {
     case "first_snapshot":
       return "First snapshot, nothing to compare with yet.";
@@ -13,8 +14,38 @@ export function noSummaryReason(snapshot: Snapshot): string {
       return "Not listed at the source (404).";
     case "incomplete_listing":
       return `Incomplete listing from the source (missing: ${snapshot.missingFields.join(", ") || "?"}), ignored for comparison.`;
+    default:
+      return null;
+  }
+}
+
+/** What to say about a change's AI summary when there isn't one (yet). */
+export type SummaryNotice = { kind: "working" } | { kind: "missing"; text: string };
+
+function retryText(retryAt: string | null, gaveUp: string): string {
+  return retryAt ? `Trying again at ${shortTime(retryAt)}.` : gaveUp;
+}
+
+/** Explains a change's missing AI summary; null when the summary is there. */
+export function summaryNotice(snapshot: Snapshot): SummaryNotice | null {
+  const { summaryStatus, summaryError, summaryRetryAt, summaryAttempts } = snapshot;
+  const gaveUp = `Gave up after ${summaryAttempts === 1 ? "1 attempt" : `${summaryAttempts} attempts`}.`;
+  switch (summaryStatus) {
     case "pending":
-      return "Change detected. The AI summary hasn't been generated yet.";
+      return { kind: "working" };
+    case "llm_timeout":
+      return { kind: "missing", text: `The AI didn't answer in time. ${retryText(summaryRetryAt, gaveUp)}` };
+    case "llm_failed":
+      return { kind: "missing", text: `The AI service failed (${summaryError ?? "unknown error"}). ${retryText(summaryRetryAt, gaveUp)}` };
+    case "unusable_output":
+      return { kind: "missing", text: `The AI's answer couldn't be used (${summaryError ?? "unknown reason"}), so it isn't shown.` };
+    case "daily_cap_reached":
+      return {
+        kind: "missing",
+        text: `Today's limit of AI summaries is used up. ${summaryRetryAt ? `It will be written after the limit resets at midnight UTC (${shortTime(summaryRetryAt)} your time).` : ""}`.trim(),
+      };
+    default:
+      return null;
   }
 }
 

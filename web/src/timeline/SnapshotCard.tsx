@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Snapshot, SnapshotStatus } from "../api.ts";
 import { absoluteTime, relativeTime } from "../format.ts";
+import { ChangeSummary } from "./ChangeSummary.tsx";
 import { changeLabel, noSummaryReason } from "./snapshot-labels.ts";
 
 type FieldName = "title" | "tagline" | "price" | "description";
@@ -49,18 +50,16 @@ function Header({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
-/** One poll in the timeline: when, the listing as fetched, and the summary or why there is none. */
+/** One poll in the timeline: when, the listing as fetched, and what changed or why there is nothing to summarise. */
 export function SnapshotCard({ snapshot }: { snapshot: Snapshot }) {
   const hasListing = snapshot.status === "ok" || snapshot.status === "partial";
+  const reason = noSummaryReason(snapshot);
   return (
     <li className={snapshot.changed ? "snapshot snapshot--changed" : "snapshot"}>
       <Header snapshot={snapshot} />
       {hasListing && <Listing snapshot={snapshot} />}
-      {snapshot.summary ? (
-        <p className="snapshot-summary">{snapshot.summary}</p>
-      ) : (
-        <p className="snapshot-reason">{noSummaryReason(snapshot)}</p>
-      )}
+      {snapshot.changed && <ChangeSummary snapshot={snapshot} />}
+      {reason && <p className="snapshot-reason">{reason}</p>}
     </li>
   );
 }

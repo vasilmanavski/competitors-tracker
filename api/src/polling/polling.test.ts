@@ -93,11 +93,11 @@ describe("polling → snapshots → timeline", () => {
       ["ok", false, "first_snapshot", []],
       ["ok", false, "not_changed", []],
       ["partial", false, "incomplete_listing", []],
-      ["ok", true, "pending", ["price"]],
+      ["ok", true, "summarized", ["price"]],
       ["fetch_failed", false, "fetch_failed", []],
-      ["not_found", true, "pending", ["availability"]],
+      ["not_found", true, "summarized", ["availability"]],
       ["not_found", false, "not_found", []],
-      ["ok", true, "pending", ["availability"]],
+      ["ok", true, "summarized", ["availability"]],
     ]);
 
     const [relisted, , , failed, , partial, , first] = rows;
@@ -197,7 +197,7 @@ describe("scheduling", () => {
       maxInFlight: 10,
       tickMs: 20,
       log: silent,
-      poll: async (id) => {
+      runJob: async (id) => {
         polled.push(id);
         if (id === "boom") throw new Error("kaboom");
       },
@@ -219,7 +219,7 @@ describe("scheduling", () => {
       maxInFlight: 2,
       tickMs: 10,
       log: silent,
-      poll: async () => {
+      runJob: async () => {
         peak = Math.max(peak, ++running);
         await sleep(60);
         running--;

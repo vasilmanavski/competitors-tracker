@@ -3,18 +3,25 @@ import {
   bigserial,
   boolean,
   check,
+  date,
   index,
+  integer,
+  jsonb,
   numeric,
   pgTable,
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
+import type { FieldChange } from "../listings/field-changes.ts";
 
 /** What one poll produced. Every poll is stored, whatever happened. */
 export const SNAPSHOT_STATUSES = ["ok", "partial", "not_found", "fetch_failed"] as const;
 export type SnapshotStatus = (typeof SNAPSHOT_STATUSES)[number];
 
-/** Why a snapshot does or doesn't have a summary. */
+/**
+ * Why a snapshot does or doesn't have a summary. The first five mean "nothing to
+ * summarise"; the rest track the LLM work for a change.
+ */
 export const SUMMARY_STATUSES = [
   "first_snapshot",
   "not_changed",
@@ -22,8 +29,16 @@ export const SUMMARY_STATUSES = [
   "not_found",
   "incomplete_listing",
   "pending",
+  "summarized",
+  "llm_timeout",
+  "llm_failed",
+  "unusable_output",
+  "daily_cap_reached",
 ] as const;
 export type SummaryStatus = (typeof SUMMARY_STATUSES)[number];
+
+/** Who wrote a summary: our rules for structured changes, or the LLM for wording changes. */
+export const SUMMARY_SOURCES = ["rule", "llm"] as const;
 
 /** What we know about the competitor at the source, from confirmed answers (200 or 404) only. */
 export const LISTING_STATES = ["unknown", "listed", "never_listed", "delisted"] as const;
@@ -75,12 +90,20 @@ export const snapshots = pgTable(
     summary: text("summary"),
     summaryStatus: text("summary_status", { enum: SUMMARY_STATUSES }).notNull(),
     error: text("error"),
+    changes: jsonb("changes").$type<FieldChange[]>().notNull().default(sql`'[]'::jsonb`),
+    summaryAttempts: integer("summary_attempts").notNull().default(0),
+    summaryNextAttemptAt: timestamp("summary_next_attempt_at", { withTimezone: true }),
+    summaryError: text("summary_error"),
+    summarySource: text("summary_source", { enum: SUMMARY_SOURCES }),
   },
   (t) => [
     index("snapshots_competitor_fetched_idx").on(t.competitorId, t.fetchedAt.desc()),
     index("snapshots_last_ok_idx")
       .on(t.competitorId, t.fetchedAt.desc())
       .where(sql`${t.status} = 'ok'`),
+    index("snapshots_summary_due_idx")
+      .on(t.summaryNextAttemptAt)
+      .where(sql`${t.summaryNextAttemptAt} is not null`),
     check("snapshots_status_check", sql`${t.status} in (${inList(SNAPSHOT_STATUSES)})`),
     check(
       "snapshots_summary_status_check",
@@ -88,3 +111,9 @@ export const snapshots = pgTable(
     ),
   ],
 );
+
+/** LLM calls made per UTC day, so the daily cap holds across restarts and instances. */
+export const llmUsage = pgTable("llm_usage", {
+  day: date("day", { mode: "string" }).primaryKey(),
+  calls: integer("calls").notNull().default(0),
+});

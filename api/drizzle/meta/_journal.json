@@ -22,6 +22,20 @@
       "when": 1795680513795,
       "tag": "0002_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795687592677,
+      "tag": "0003_summaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795688962184,
+      "tag": "0004_summary_source",
+      "breakpoints": true
     }
   ]
 }

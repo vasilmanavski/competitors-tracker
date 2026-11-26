@@ -1,7 +1,8 @@
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import type { DbExecutor } from "../db/client.ts";
-import { snapshots } from "../db/schema.ts";
+import { SUMMARY_SOURCES, type SummaryStatus, snapshots } from "../db/schema.ts";
 import type { ChangeDecision, PollOutcome } from "../listings/change-detection.ts";
+import type { FieldChange } from "../listings/field-changes.ts";
 import type { Price, PricePeriod } from "../listings/normalize.ts";
 
 export type Snapshot = typeof snapshots.$inferSelect;
@@ -12,6 +13,29 @@ export type NewSnapshot = {
   fetchedAt: Date;
   outcome: PollOutcome;
   decision: ChangeDecision;
+  changes: FieldChange[];
+  initialSummary: InitialSummary;
+};
+
+export type SummarySource = (typeof SUMMARY_SOURCES)[number];
+
+/** The summary a snapshot starts with: written by our rules, queued for the LLM, or not needed. */
+export type InitialSummary = {
+  status: SummaryStatus;
+  text: string | null;
+  source: SummarySource | null;
+  /** When the summary worker should pick it up; null when no LLM call is needed. */
+  dueAt: Date | null;
+};
+
+/** The result of one summary attempt, written back onto the snapshot. */
+export type SummaryUpdate = {
+  summaryStatus: SummaryStatus;
+  summary: string | null;
+  summaryError: string | null;
+  summaryAttempts: number;
+  summaryNextAttemptAt: Date | null;
+  summarySource: SummarySource | null;
 };
 
 /** A page of the timeline: newest first, strictly older than `before` when given. */
@@ -42,7 +66,7 @@ function listingColumns(outcome: PollOutcome) {
   };
 }
 
-function toRow({ competitorId, fetchedAt, outcome, decision }: NewSnapshot) {
+function toRow({ competitorId, fetchedAt, outcome, decision, changes, initialSummary }: NewSnapshot) {
   return {
     competitorId,
     fetchedAt,
@@ -50,9 +74,12 @@ function toRow({ competitorId, fetchedAt, outcome, decision }: NewSnapshot) {
     ...listingColumns(outcome),
     changed: decision.changed,
     changedFields: decision.changedFields,
-    summary: null,
-    summaryStatus: decision.summaryStatus,
+    summary: initialSummary.text,
+    summaryStatus: initialSummary.status,
+    summarySource: initialSummary.source,
     error: outcome.status === "fetch_failed" ? outcome.error : null,
+    changes,
+    summaryNextAttemptAt: initialSummary.dueAt,
   };
 }
 
@@ -75,6 +102,36 @@ export function createSnapshotRepository(db: DbExecutor) {
       const [row] = await db.insert(snapshots).values(toRow(snapshot)).returning();
       if (!row) throw new Error("insert into snapshots returned no row");
       return row;
+    },
+
+    async findById(id: number): Promise<Snapshot | null> {
+      const [row] = await db.select().from(snapshots).where(eq(snapshots.id, id));
+      return row ?? null;
+    },
+
+    /**
+     * Claims up to `limit` snapshots whose summary is due, newest change first, by pushing
+     * their next attempt one lease ahead. If the worker dies mid-call, the snapshot is
+     * picked up again when the lease runs out. SKIP LOCKED lets several instances share the work.
+     */
+    async claimSummaryDue(limit: number, leaseSeconds: number, excludeIds: number[] = []): Promise<number[]> {
+      if (limit <= 0) return [];
+      const exclude = excludeIds.length > 0 ? excludeIds : [0];
+      const result = await db.execute<{ id: string }>(sql`
+        update ${snapshots} set summary_next_attempt_at = now() + make_interval(secs => ${leaseSeconds})
+        where id in (
+          select id from ${snapshots}
+          where summary_next_attempt_at <= now() and id <> all(${sql.param(exclude)}::bigint[])
+          order by fetched_at desc, id desc
+          limit ${limit}
+          for update skip locked
+        )
+        returning id`);
+      return result.rows.map((row) => Number(row.id));
+    },
+
+    async updateSummary(id: number, update: SummaryUpdate): Promise<void> {
+      await db.update(snapshots).set(update).where(eq(snapshots.id, id));
     },
 
     findNewestFirst(competitorId: string, page: TimelinePage): Promise<Snapshot[]> {

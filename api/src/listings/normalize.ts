@@ -114,6 +114,11 @@ export function formatPrice(price: Price): string {
   return `${prefix}${amount}${suffix}`;
 }
 
+/** How a price is shown to people: the canonical form when understood, else the source's cleaned wording. */
+export function displayPrice(price: Price | null, priceText: string | null): string | null {
+  return price ? formatPrice(price) : priceText;
+}
+
 /** The value a price is compared on: the parsed price when understood, otherwise the cleaned text. */
 export function priceKey(price: Price | null, priceText: string | null): string | null {
   if (price) return `${price.amount}|${price.currency ?? ""}|${price.period ?? ""}`;
