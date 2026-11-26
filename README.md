@@ -1,10 +1,15 @@
 # CompetitorPulse
 
-Tracks competitor product listings over time, decides when a listing changed in a way that matters to a product manager, and explains the change in plain English.
+Tracks competitor listings over time, decides when a listing changed in a way a product manager would care about, and explains the change in plain English.
 
-- **Backend:** Node.js 22 + TypeScript (strict), Fastify, Zod, PostgreSQL with Drizzle migrations.
-- **Frontend:** React + Vite (TypeScript), served by nginx in Docker.
-- **Background work:** a polling scheduler and an LLM summary worker, both inside the API process.
+**In short**
+- `docker compose up --build`, then open http://localhost:8080.
+- Every poll is stored, including unchanged and failed ones. A change is decided on 4 normalised fields, so format noise never counts.
+- Price, title and availability changes are summarised by my own code. The LLM is only used for wording changes, where interpretation actually helps.
+- The source rate limit and the 2,000/day LLM cap are both enforced in a way that holds across restarts. When the numbers don't fit, the system slows down instead of breaking.
+- [The production numbers don't fit](#the-production-numbers-dont-fit-what-id-do) is where most of my thinking went.
+
+**Stack:** Node.js 24 + TypeScript (strict), Fastify, Zod, PostgreSQL with Drizzle migrations. React + Vite on the frontend, served by nginx in Docker. Polling and LLM summaries run as background workers inside the API process.
 
 ```
 browser ─► web (nginx :8080) ─/api─► api (:3000) ─► postgres
@@ -16,24 +21,22 @@ browser ─► web (nginx :8080) ─/api─► api (:3000) ─► postgres
 
 ## Run it
 
-### With Docker (one command)
+### With Docker
 ```bash
 docker compose up --build
 ```
-Open **http://localhost:8080**. Track `acme-crm`; its first poll lands within about a second.
+Open **http://localhost:8080** and track `acme-crm`. The first poll lands within a second. Migrations run when the API starts.
 
-| Service | Host port | Notes |
+| Service | Port | Notes |
 |---|---|---|
 | web | 8080 | React app; nginx proxies `/api` to the API |
 | api | 3000 | `GET /health` |
 | listing-source | 4002 | the provided source, unmodified |
 | mock-llm | 4001 | the provided mock LLM, unmodified |
-| postgres | 5433 | 5433 avoids a clash with a local Postgres |
-
-Migrations run automatically when the API starts.
+| postgres | 5433 | not 5432, so it doesn't clash with a local Postgres |
 
 ### Without Docker
-Needs Node ≥ 24 (npm ≥ 11.19; see `.nvmrc`), Python 3 and a local PostgreSQL.
+Needs Node ≥ 24 (npm ≥ 11.19, see `.nvmrc`), Python 3 and a local PostgreSQL.
 ```bash
 npm run setup      # installs everything, creates the DB, copies api/.env.example → api/.env
 npm run dev:all    # source :4002, mock LLM :4001, API :3000, web :5173
@@ -46,93 +49,96 @@ Every setting is an env var, validated at startup. For Docker, put overrides in 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SOURCE_BASE_URL` | `http://listing-source:4002` | The listing source |
-| `POLL_INTERVAL_SECONDS` | `900` | Poll every competitor every 15 min. A change applies from each competitor's next poll; to apply it at once: `update competitors set next_poll_at = now()` |
-| `SOURCE_RATE_LIMIT_PER_SECOND` | `4` | Our pace for **all** source requests (the source allows 5) |
-| `SOURCE_TIMEOUT_MS` / `SOURCE_MAX_RETRIES` | `5000` / `2` | Per attempt; retries on 5xx, timeout, network error, non-JSON |
+| `POLL_INTERVAL_SECONDS` | `900` | Poll each competitor every 15 min |
+| `SOURCE_RATE_LIMIT_PER_SECOND` | `4` | Pace for **all** source requests (the source allows 5) |
+| `SOURCE_TIMEOUT_MS` / `SOURCE_MAX_RETRIES` | `5000` / `2` | Per attempt; retried on 5xx, timeout, network error, non-JSON |
 | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | mock | Any OpenAI Chat Completions endpoint |
 | `LLM_DAILY_CAP` | `2000` | Hard cap on LLM calls per UTC day |
 | `LLM_TIMEOUT_MS` | `10000` | Per LLM call |
-| `SNAPSHOT_RETENTION_DAYS` | `90` | Uneventful polls older than this are purged; changes are kept (see below) |
-| `SCHEDULER_ENABLED` | `true` | `false` runs the API without background work (polling, summaries, retention) |
+| `SNAPSHOT_RETENTION_DAYS` | `90` | Unchanged polls older than this are deleted; changes are kept |
+| `SCHEDULER_ENABLED` | `true` | `false` runs the API without background work |
 
-### Point it at a different listing source
+A new poll interval applies from each competitor's next poll. To apply it straight away: `update competitors set next_poll_at = now()`.
+
+### A different listing source
 ```bash
 # .env next to docker-compose.yml
 SOURCE_BASE_URL=http://host.docker.internal:5002
 ```
-The backend reaches the source only through this URL and never reads its files.
+The backend only talks to the source over this URL. It never reads the source's files.
 
-### Which LLM, and how to use another one
-**Used: the provided mock LLM** (no money spent, no key to share). The mock doesn't write real summaries: it echoes the first 160 characters of the prompt, so its "summaries" look like `Mock AI summary (not a real model). Based on what you sent: "Old tagline: …"`. The prompt puts the changes first, so the echo shows what was sent.
+### Which LLM
+I used **the provided mock LLM**: no cost, no key to share. It doesn't write real summaries. It echoes the first 160 characters of the prompt, so a "summary" looks like `Mock AI summary (not a real model). Based on what you sent: "Old tagline: …"`. I put the changes first in the prompt so the echo shows what was sent.
 
-The client speaks the OpenAI Chat Completions shape, so any compatible provider is only a config change:
+The client speaks the OpenAI Chat Completions format, so switching provider is just config:
 ```bash
 # OpenAI
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=sk-...
 LLM_MODEL=gpt-4o-mini
 
-# Ollama, free and local (brew install ollama && ollama serve && ollama pull llama3.2)
+# Ollama (free, local)
 LLM_BASE_URL=http://host.docker.internal:11434/v1   # http://localhost:11434/v1 without Docker
 LLM_API_KEY=ollama
 LLM_MODEL=llama3.2
+LLM_TIMEOUT_MS=60000                                # a local model on CPU is slower
 ```
-I tested the prompt against Ollama `llama3.2` as well as the mock.
+I also tested everything against Ollama `llama3.2`, and the prompt design came out of those tests.
 
 ---
 
 ## What you'll see, and how to check it
 
-1. **List view:** add / remove competitors. Badges: **changed in last 24 h**, and **never found at source** for ids that have only ever returned 404 (typos are accepted, then flagged).
-2. **Timeline view:** newest first. Each change is a card with the listing, the **old → new values**, and a summary, or the reason there is none. Runs of unchanged polls collapse into one divider: `No change · 46 checks · 6:00 AM – 5:15 PM`.
+- **List view:** add and remove competitors. Badges show **changed in the last 24 h**, and **never found at source** for ids that have only ever returned 404. I accept unknown ids and flag them, so a typo is visible rather than rejected.
+- **Timeline view:** newest first. Each change is a card with the listing, the **old → new values**, and the summary or the reason there isn't one. A run of unchanged polls collapses into one line: `No change · 46 checks · 6:00 AM – 5:15 PM`.
 
-**Rule vs AI summaries.** A price, title or availability change gets a summary **written by our code**, with no LLM call: *"Price dropped from $39/mo to $29/mo (-26%)."* (green **Summary**). Only tagline and description changes, where wording has to be interpreted, go to the LLM (blue **AI summary**). So with the provided fixtures:
+**Code vs AI summaries.** A price, title or availability change gets a summary written by code, with no LLM call: *"Price dropped from $39/mo to $29/mo (-26%)."* (green **Summary**). Tagline and description changes go to the LLM (blue **AI summary**). You can check it with the provided fixtures:
 ```bash
-curl -X POST localhost:4002/control/advance -d '{"id":"acme-crm","steps":2}'  # price → rule summary
+curl -X POST localhost:4002/control/advance -d '{"id":"acme-crm","steps":2}'  # price → code summary
 curl localhost:4001/control/stats                                           # {"callCount": 0}
 curl -X POST localhost:4002/control/advance -d '{"id":"acme-crm","steps":1}'  # tagline → AI summary
 curl localhost:4001/control/stats                                           # {"callCount": 1}
 ```
 
-**Failure handling** (each was verified in a browser):
+**Failures.** I checked each of these in the browser:
 
 | Try | Expect |
 |---|---|
-| `curl -X POST localhost:4002/control/configure -d '{"failNext":40}'` | "Fetch failed: HTTP 503 (3 attempts)" cards; the scheduler keeps going |
+| `curl -X POST localhost:4002/control/configure -d '{"failNext":40}'` | "Fetch failed: HTTP 503 (3 attempts)" cards; polling carries on |
 | `… '{"rateLimitPerSecond":1}'` (source) | 429s are waited out (`Retry-After`); no poll is lost |
 | `… '{"partialNext":2}'` (source) | "Incomplete listing", never a false change |
 | `curl -X POST localhost:4001/control/configure -d '{"failNext":1}'` | "The AI service failed (HTTP 500: …). Trying again at …", then the retry succeeds |
 | `… '{"latencyMs":20000}'` (mock LLM) | "Writing an AI summary…", polling continues, then "The AI didn't answer in time. Trying again at …" |
-| `LLM_DAILY_CAP=1`, two wording changes | the second: "Today's limit of AI summaries is used up… resets at midnight UTC" |
+| `LLM_DAILY_CAP=1`, two wording changes | the second shows "Today's limit of AI summaries is used up… resets at midnight UTC" |
 
 ---
 
-## Main decisions (and what I considered instead)
+## Main decisions
 
-Full reasoning per epic: [`docs/epics/`](docs/epics).
+The full reasoning for each part is in [`docs/epics/`](docs/epics).
 
-**What counts as a change**
-- Every response is **normalised** to 4 fields (title, tagline, price, description). Noise fields are dropped; HTML entities and whitespace are cleaned. The price is parsed to `{amount, currency, period}`, so `$39/mo`, `$39.00/mo`, `USD 39 per month` are equal, and `Free` = `$0/mo`. *Considered:* comparing raw text (endless false changes) or hashing the response (noise changes every request).
-- **Changed** = a normalised field differs from the **last complete (`ok`) snapshot**. Any remaining text edit counts, typo fixes included: deciding how much it matters is the summary's job. *Considered:* a similarity threshold, which can hide real one-word changes.
-- An **incomplete listing** is stored but never compared against and never reported as "field removed". A **failed fetch** is never a change.
-- **Delisting and relisting are changes**, based only on a real 404 after the listing had been seen. A 404 for an id never seen means "never found at source", not a change.
-- **Unknown ids are accepted.** The source can't tell us in advance, a 404 also means "temporarily delisted", and checking at request time would make `POST` depend on a rate-limited, flaky source. *Considered:* rejecting on 404.
+### What counts as a change
+- Every response is **normalised to 4 fields**: title, tagline, price, description. Noise fields are dropped, and HTML entities and whitespace are cleaned up. The price is parsed into `{amount, currency, period}`, so `$39/mo`, `$39.00/mo` and `USD 39 per month` are equal, and `Free` equals `$0/mo`. Comparing raw text or hashing the response would flag a change on almost every poll.
+- **Changed** means a normalised field differs from the **last complete snapshot**. Any text edit counts, typo fixes included. Deciding how much it matters is the summary's job. I didn't use a similarity threshold, because it can hide a real one-word change.
+- An **incomplete listing** is stored but never compared against. A **failed fetch** is never a change.
+- **Delisting and relisting are changes**, but only after the listing had been seen. A 404 for an id that was never found means "never found at source".
+- **Unknown ids are accepted.** The source can't tell me in advance which ids exist, a 404 can also mean "temporarily delisted", and checking on `POST` would make adding a competitor depend on a flaky, rate-limited source.
 
-**Rate limit and the scheduler**
-- **One global limiter** at 4 req/s, evenly spaced (no bursts). On a 429 it pauses **every** caller for `Retry-After`. *Considered:* per-competitor limits; the source's limit is global, so they don't help.
-- Each attempt times out after 5 s; 5xx, timeouts and network errors are retried twice with backoff. After that, a `fetch_failed` snapshot stores each attempt's error. The next scheduled poll is the retry. *Considered:* re-polling failures early, rejected because the rate limit, not failures, is the binding constraint.
-- **The database is the queue.** A 1-second tick claims due competitors with `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)`, pushing `next_poll_at` forward *before* fetching. A slow poll is never picked twice, several API instances can share the work, and when polling falls behind the interval stretches instead of a backlog piling up. *Considered:* a job queue (Redis/BullMQ), which is another moving part for no gain at this size, and a DB trigger with `LISTEN/NOTIFY`, which isn't durable and doesn't help with the real bottleneck.
+### Rate limit and scheduling
+- **One global limiter** at 4 req/s, evenly spaced, never in bursts. I stay under the source's 5 because I can't see its counting window. A 429 pauses **every** request for the `Retry-After` time. Per-competitor limits wouldn't help, since the source's limit is global.
+- Each attempt times out after 5 s. 5xx, timeouts and network errors are retried twice with backoff, then a `fetch_failed` snapshot stores every attempt's error. The next scheduled poll is the retry. I didn't re-poll failures early, because the rate limit is the real constraint.
+- **The database is the queue.** Every second, the scheduler claims due competitors with `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)` and moves their `next_poll_at` forward *before* fetching. A slow poll is never picked twice, several instances can share the work, and when polling falls behind, the interval stretches instead of a backlog building up. A Redis/BullMQ queue would be one more moving part for no gain at this size.
 
-**How history is stored**
-- **Every poll is a row** (`snapshots`), including no-change, incomplete, 404 and failed polls, because the brief requires them visible for 90 days. Change detection and the insert run in **one transaction** with the competitor row locked. The list view reads denormalised `last_*` columns on `competitors`, so it never scans snapshots. Deleting a competitor deletes its history. *Considered:* storing only changes (fails the 90-day requirement) and soft delete.
-- **Retention: keep the changes, expire the noise.** An hourly job (also run at startup) deletes *uneventful* snapshots (no change, incomplete, failed, still not listed) older than `SNAPSHOT_RETENTION_DAYS` (90), in batches of 5,000. Changes and each competitor's first snapshot are kept for good: they're a tiny fraction of the rows and the history a product manager comes back for ("when did they drop their price?"). Each competitor's **latest complete listing is never deleted, however old**, because the next poll is compared with it. Otherwise a competitor delisted for 100 days would come back as a "first snapshot" instead of "back on the source, price dropped". *Considered:* deleting everything older than 90 days (loses the change history and can break change detection), and keeping everything (unbounded growth).
+### How history is stored
+- **Every poll is a row** in `snapshots`, including unchanged, incomplete, 404 and failed polls, because the brief wants all of them visible for 90 days. Change detection and the insert run in one transaction with the competitor row locked. The list view reads summary columns on `competitors`, so it never scans snapshots.
+- **Retention keeps the changes and expires the noise.** An hourly job deletes uneventful snapshots older than 90 days, in batches of 5,000. Changes and each competitor's first snapshot are kept for good. They're a tiny share of the rows, and they're the history people come back for ("when did they drop their price?"). Each competitor's **latest complete listing is never deleted**, however old, because the next poll is compared with it. Without that, a competitor delisted for 100 days would come back as a "first snapshot" instead of "back on the source, price dropped".
 
-**The LLM and the cap**
-- **A poll never waits for the LLM.** The snapshot is committed first; a separate **summary worker** (same `SKIP LOCKED` pattern, newest change first, 120 s lease) does the call. A slow or failing LLM can't lose or delay a poll result.
-- **Rules for structured changes, LLM for wording.** Price, title and availability changes are summarised by code at poll time: free, instant, and never a wrong number. *Considered:* calling the LLM for every change, which spends the cap on changes a template states better.
-- **Prompt:** the changed fields as `Old …` / `New …` lines, then the current normalised listing as context, never the raw response. The system prompt asks for *what changed and what it likely signals* for a product manager, with two worked examples. Listing text is treated as data. Testing on a real model shaped this: an inline `"a" → "b"` format made llama3.2 invent or reverse values in 4/4 runs, and labelled lines fixed it.
-- **Cap:** counted per UTC day in Postgres, claimed atomically before each call (`… ON CONFLICT DO UPDATE … WHERE calls < cap`), so it holds across restarts and instances. Failed calls count too.
-- **What the user sees when there's no AI summary:** the old → new values are always shown, plus the reason:
+### The LLM and the cap
+- **A poll never waits for the LLM.** The snapshot is saved first. A separate summary worker makes the call (same `SKIP LOCKED` pattern, newest change first, 120 s lease). A slow or failing LLM can't lose or delay a poll.
+- **Code for structured changes, LLM for wording.** A price, title or availability change is summarised by code at poll time: free, instant, and never a wrong number.
+- **Prompt:** the changes as labelled `Old …` / `New …` lines, then the current listing as context, never the raw response. The system prompt asks what changed and what it likely signals for a product manager, with two worked examples. Listing text is treated as data. This came from testing on llama3.2: an inline `"a" → "b"` format made it invent or reverse values in 4 out of 4 runs, and labelled lines fixed it.
+- **Cap:** counted per UTC day in Postgres and claimed atomically before each call (`… ON CONFLICT DO UPDATE … WHERE calls < cap`), so it holds across restarts and instances. Failed calls count too.
+- **When there's no AI summary**, the old → new values are always shown, plus the reason:
 
   | Situation | Shown | Then |
   |---|---|---|
@@ -145,95 +151,86 @@ Full reasoning per epic: [`docs/epics/`](docs/epics).
 
 ## The production numbers don't fit: what I'd do
 
-The brief: 6,000 competitors every 15 min, a 5 req/s source, 2,000 LLM calls/day, 90 days of history.
+The brief: 6,000 competitors every 15 min, a source that allows 5 req/s, 2,000 LLM calls a day, 90 days of history.
 
-**1. Polling needs 6.7 req/s; the source allows 5.**
-6,000 × 4 polls/h = 24,000/h = **6.7 req/s**, before any retries. At our 4 req/s a full round takes **25 min**; at the full 5 req/s, 20 min. What the system does today: it degrades gracefully. Every competitor is still polled in turn, the interval just stretches, and the limit is never exceeded. What I'd do next:
-- **Tiered intervals by volatility:** competitors that changed recently are polled every 15 min, quiet ones every 60 min (`last_changed_at` is already stored). For example, 1,000 active at 15 min (1.1 req/s) plus 5,000 quiet at 60 min (1.4 req/s) is **2.5 req/s**, with headroom for retries.
-- **Ask the source owner** for a higher limit or a batch/changes-since endpoint. One request for many ids beats any scheduling trick.
-- **New competitors first:** when behind, a newly added competitor currently queues behind overdue ones. Defaulting its `next_poll_at` to the past is a one-line fix (not built).
+### 1. Polling needs 6.7 req/s; the source allows 5
+6,000 polls every 15 min is **6.7 req/s** before retries. At my 4 req/s, one 15-minute window fits 3,600 polls, so up to 3,600 competitors keep their 15-minute interval. Past that, nothing breaks: every competitor is still polled in turn, oldest first, and the interval stretches. At 6,000 a full round takes **25 min**. The limit is never exceeded and no backlog builds up.
 
-**2. 2,000 LLM calls/day can't cover every change.**
-The cap is defended by a funnel, not by one trick. Each layer cuts what reaches the next:
+What I'd do next:
+- **Poll quiet competitors less often.** The data is already there: `competitors.last_changed_at` is updated on every real change.
+  - No change in the last 7 days → poll every 60 min. Changed recently, or new → every 15 min.
+  - It adjusts itself. A quiet competitor that changes goes straight back to 15 min, which is when follow-up changes usually come. After 7 quiet days it drops to 60 min.
+  - It's one `CASE` in `claimDue` that picks the interval from `last_changed_at`. No new tables.
+  - Example: 1,000 active at 15 min (1.1 req/s) + 5,000 quiet at 60 min (1.4 req/s) = **2.5 req/s**, with room for retries.
+  - The cost: a change on a quiet competitor is seen up to an hour late. I'd let users pin important competitors to 15 min. And I'd measure the real share of quiet competitors first, because if most are active this doesn't help much.
+- **Ask the source owner** for a higher limit or a batch / "changes since" endpoint. One request for many ids beats any scheduling trick. Conditional requests (`ETag` → `304`) would also help on a real site; this source doesn't support them.
+- **Poll new competitors first.** A newly added competitor currently waits behind overdue ones. Defaulting its `next_poll_at` to the past is a one-line fix.
 
-| Layer | Calls/day left |
+### 2. 2,000 LLM calls a day
+Spend can never go over 2,000, because of the cap. The real question is whether every change still gets a summary. Each step cuts what reaches the next:
+
+| Step | Calls/day left |
 |---|---|
-| Naive: one LLM call per poll (6,000 × 96) | 576,000 |
-| Change detection: only polls where a field that matters really changed. Noise fields, format variants (`$39 / month` vs `USD 39 per month`), partial and failed responses never count. | = real changes/day |
-| Rules: price, title and availability changes are written by code | = wording changes/day |
-| Cap: claimed atomically in Postgres; overflow is deferred to the next UTC day, newest first, with old → new still shown | ≤ 2,000 |
+| One call per poll (6,000 × 96) | 576,000 |
+| Only real changes: noise fields, price formats, partial and failed responses don't count | = real changes/day |
+| Code summaries for price, title and availability | = wording changes/day |
+| The cap; the rest waits for the next UTC day with old → new still shown | ≤ 2,000 |
 
-The rules alone don't make it fit. They only remove the structured share of changes. Change detection does most of the work. The real question is how often listings are *reworded*. **Break-even is one wording change per competitor every 3 days** (2,000 / 6,000). Weekly rewording is ~860 calls/day and fits. Daily rewording is 6,000 and doesn't. Then the cap guarantees spend never goes over, and the steps below decide which summaries come first.
+Change detection does most of the work. The code summaries only remove the structured share. **Break-even is one wording change per competitor every 3 days** (2,000 / 6,000). Weekly rewording is ~860 calls a day and fits. Daily rewording is 6,000 and doesn't.
 
-**What happens to the overflow: newest first, not "where it left off".** Once the cap is reached, a change keeps its snapshot, its `changed: true` and its old → new values; only the AI sentence waits. At midnight UTC the waiting changes become due again, and the worker takes the **newest first** across all competitors. A summary loses value as it ages. Oldest first under steady overload would make *every* summary later each day, so nothing is ever current. Newest first keeps fresh changes on time and leaves only the overflow without an AI sentence. Two side effects, fixed by the first two steps below:
-- **Starvation:** the oldest overflow is pushed back every night and keeps saying "waiting for a summary" indefinitely.
-- **Unfairness:** one competitor rewording 50 times takes 50 of the newest slots, and another competitor's single change misses out.
+**Past the cap, newest first.** At midnight the waiting changes become due again, and the worker takes the newest first. A summary loses value as it ages. Oldest first under steady overload would make every summary a bit later each day, so nothing would ever be current. Newest first has two side effects: the oldest overflow can wait forever, and one competitor rewording 50 times can crowd out others. So, next, in this order:
+- **One summary per competitor:** three rewordings get one summary of the net change, which is cheaper and more useful. The queue then has one entry per competitor, so each competitor's latest state gets the summary.
+- **Give up on stale ones:** after about 3 days, mark the change "not summarised: too old" and stop retrying. The old → new values stay.
+- **Prioritise** by competitor importance or size of change, and say so in the UI.
+- **Batch several competitors per call, only under cap pressure.** The cap counts calls, so 10 changes in one call would stretch it about tenfold. But a per-call cap is unusual: providers bill by tokens, so Finance probably means "keep the cost down". I'd check with them before relying on this. It also needs structured output with per-item validation, one timeout delays the whole batch, and the model can mix up details between competitors. It can't be shown with the mock either, since the mock only echoes the prompt.
 
-Next, in this order:
-- **Coalesce per competitor:** if one competitor reworded its listing three times, one summary of the net change is cheaper *and* more useful than three. The queue then holds one entry per competitor with new changes. That fixes the unfairness and means each competitor's **latest state** gets the summary. It stays one competitor per prompt and plain-text output, so the current design holds.
-- **Expire stale ones:** a change still unsummarised after a few days (say 3) gets a final "not summarised: too old" status and stops retrying. It keeps its old → new values, so nothing is hidden.
-- **Prioritise** the budget by competitor importance or size of change, and say so in the UI.
-- **Batch several competitors per call, but only under cap pressure.** The cap counts calls, not tokens, so one call that summarises 10 changes stretches 2,000 calls to ~20,000 summaries. A per-call cap is unusual, though: providers bill by tokens, so Finance most likely means "keep the cost down", and batching keeps the letter of the cap rather than its intent. **I'd confirm with Finance whether they mean calls or cost before relying on it.** When pending changes exceed today's remaining budget, the worker would claim 5–10 changes, send them in one prompt with ids, and ask for `[{"id": 1, "summary": "…"}, …]`. Below that pressure it keeps today's single calls.
+### 3. History: ~52 million rows
+6,000 × 96 polls a day × 90 days = **51.8M rows**, mostly unchanged polls carrying a full copy of the listing.
+- **Built:** retention (above), using a partial index on exactly the rows it deletes.
+- **Next:** partition `snapshots` by month, so an expired month goes with one instant `DROP` instead of batched deletes. Changes would be copied to a small table first so nothing is lost.
+- **Next:** store the listing text only when it changes. Unchanged polls would keep just the status and time.
+- Reads are already bounded: the timeline is paginated and the list reads one row per competitor.
 
-  **Why it isn't the default (and isn't built):**
-  - It needs structured output: models sometimes return broken JSON, skip an item or mix up ids, so every item needs validating, with missing ones re-queued as single calls.
-  - One failure hits the whole batch: a timeout delays all ten summaries.
-  - **Cross-talk:** with ten competitors in one prompt, a model can blend details between them, the kind of wrong fact the rule summaries exist to avoid.
-  - **It can't be shown with the provided mock**, which only echoes the first 160 characters of the prompt and could never return a per-item answer, so every batch would come back unusable.
-
-**3. History: ~52 million rows.**
-6,000 × 96 polls/day × 90 days = **51.8M rows**. Most are "no change" rows carrying a full copy of the listing text: tens of GB with indexes.
-- **Built: retention.** Uneventful rows older than 90 days are purged hourly in batches, using a partial index on exactly those rows, so the table stays at about 90 days of polls plus the changes, instead of growing forever.
-- **Next: partition `snapshots` by month** on `fetched_at`. At this volume, batched `DELETE`s mean steady vacuum work; with partitions the uneventful history of a whole month goes with one instant `DROP`. Changes would be copied to a small `snapshot_changes` table first, so dropping a partition never loses them.
-- **Next: store content only when it changes.** No-change rows would keep the status and time only (or one `first_at / last_at / count` row per run, which is how the UI already shows them).
-- Reads are already bounded: the timeline is paginated, and the list reads one row per competitor.
-
-**4. Running more than one instance.**
-Claiming is already safe across instances (`SKIP LOCKED`), and so is the LLM cap. The **rate limiter is per process**, though: two API replicas would send 8 req/s. Fix: run polling in one dedicated worker (`SCHEDULER_ENABLED=false` on the API replicas), or share the token bucket (Postgres or Redis).
+### 4. More than one instance
+Claiming and the LLM cap are already safe across instances. The **rate limiter isn't**: it lives in each process, so two API replicas would send 8 req/s. Fix: run polling in a single worker (`SCHEDULER_ENABLED=false` on the API replicas), or share the token bucket in Postgres or Redis.
 
 ---
 
-## How I'd use the LLM with production data: competitor trends
-I built per-change summaries because the brief asks for them, and kept the LLM to wording changes so the cap goes where interpretation helps. Running it on Ollama showed something else, though: **the AI mostly restates a change a human can read in the old → new diff** ("added payroll exports to its description…"). These fixtures are short one-liners; on real listings, a rewritten paragraph is harder to read by eye, so this has to be checked against real data and real users.
+## How I'd use the LLM with real data: competitor trends
+I built per-change summaries because the brief asks for them. Testing on Ollama, though, I noticed **the AI mostly restates a change you can already read in the old → new diff**. The fixtures are short one-liners. On real listings a rewritten paragraph is harder to read by eye, so I'd check this with real data and real users first.
 
-**If production confirms it, I'd change how the budget is spent:**
-- **Mark the changes with plain code:** a highlighted old → new diff per field and the code-written summaries that already exist. No LLM, no cap.
-- **Spend the LLM, with a bigger model, on what it's actually good at:** a **trend summary per competitor**. A per-change summary answers *"what changed?"*. A product manager's real question is *"where is this competitor heading?"*. One change says little. Ten changes over two months show a pattern, and spotting one in text is what an LLM is good at. Trends run on demand, so a pricier model per call still means far fewer calls.
+If it holds up, I'd spend the budget differently:
+- **Show the changes with plain code:** a highlighted diff per field, plus the code summaries that already exist.
+- **Use a bigger model for what LLMs are actually good at:** a **trend summary per competitor**. A per-change summary answers "what changed?". A product manager wants to know "where is this competitor heading?". One change says little, but ten over two months show a pattern.
 
-Until real data says otherwise, the trend summary would come **on top of** the per-change summaries, not instead of them.
+How I'd build it:
+- **Input:** the list of changes with dates and old → new values, not raw snapshots. Retention keeps changes for good, so the history is always there.
+- **On demand:** a "What's the trend?" button, `GET /api/competitors/:id/trend`. The result is stored until the competitor's next change, so competitors nobody opens cost nothing. It shares the daily cap.
+- **Its own model:** `LLM_TREND_MODEL`, e.g. `qwen2.5:7b`. A slower answer is fine for something you ask for.
 
-**Design:**
-- **Input: the list of changes, not raw snapshots.** Retention keeps every change and first snapshot for good, so the history is always there. The input is each change's date and old → new values, plus the starting listing. It's small, cheap and has no noise.
-- **On demand and stored:** a "What's the trend?" button calls `GET /api/competitors/:id/trend`. The result is stored and reused until the competitor's next change. Competitors nobody opens cost nothing. It goes through the same daily cap, with a small share reserved for trends.
-- **A bigger model for this job only:** `LLM_TREND_MODEL` (e.g. `qwen2.5:7b`). The quick per-change summary can stay on a small, fast model. Spotting a trend needs reasoning, and an on-demand wait of tens of seconds is acceptable.
+I tried it on llama3.2 with `orbit-hr`'s four changes (€8 → €10/seat/mo → €96/yr → free for teams under 10, and the tagline going from "HR for teams of 10 to 500" to "HR for growing teams"). It got the big picture right: a free tier for small teams and broader positioning. It got two details wrong. It called €96/yr "more premium", but that's €8/mo, so it's cheaper. And it cited the wrong change for the tagline. So before building it, I'd:
+1. Do the maths in code and send `€10/seat/mo → €96/yr (≈ €8/mo, −20%)`, never raw prices.
+2. Check every cited change in code, and reject the answer if a citation is wrong.
+3. Label it in the UI as an AI interpretation, with links to the changes it cites.
 
-**Tried on Ollama `llama3.2` (3B)** with `orbit-hr`'s four changes (€8 → €10/seat/mo, → €96/yr, → free for teams under 10, tagline "HR for teams of 10 to 500" → "HR for growing teams"). The overall reading was right: a free tier for small teams and "growing teams" positioning. Two details were wrong:
-- It called €96/yr "a more premium pricing strategy". That's €8/mo, so it's cheaper.
-- It cited change [1] for the tagline change, which was change [4].
-
-So before building it:
-1. **Do the maths in code before the prompt:** send `€10/seat/mo → €96/yr (≈ €8/mo, −20%)`, never raw prices.
-2. **Check citations in code:** every claim cites a change number. An answer citing a change that doesn't exist, or the wrong field, is rejected as unusable, like a bad per-change summary today.
-3. **Label it in the UI** as an AI interpretation, with links to the changes it cites.
-
-Not built: it goes beyond the brief (summaries between *consecutive* snapshots), and the provided mock only echoes the prompt, so a reviewer couldn't see it work.
+I didn't build it: it goes beyond the brief (summaries between consecutive snapshots), and the mock would only echo the prompt back.
 
 ---
 
 ## Left out on purpose
 - **Auth:** the brief assumes one internal user.
-- **The scaling measures above** (tiers, partitioning, shared limiter, coalescing, expiring stale summaries, batching): described, not built. Retention *is* built.
+- **The scaling steps above** (quiet-competitor intervals, partitioning, shared limiter, one summary per competitor, expiring stale summaries, batching): described, not built. Retention is built.
+- **Competitor trend summaries:** designed and tried on Ollama, not built.
 - **Cloud deployment** (bonus): skipped to keep the time reasonable.
-- **Fine-tuning a model:** no budget, not possible on the mock, and the problem is prompting, not model knowledge.
-- **Competitor trend summaries:** designed and tried on Ollama, not built (see above).
-- **Notifications** (email/Slack on change) and **soft delete**.
-- **Browser e2e tests in the repo:** the UI was verified manually in Chrome; automated tests cover the API, the domain logic and the UI's grouping logic (152 API + 4 web tests).
+- **Fine-tuning:** no budget, not possible on the mock, and the problem is prompting, not model knowledge.
+- **Notifications** (email/Slack) and **soft delete**.
+- **Browser e2e tests:** I tested the UI by hand in Chrome. Automated tests cover the API, the domain logic and the UI's grouping logic (157 API + 4 web tests).
 
 ## AI tools
-I built this with **Claude Code** (Anthropic), used as a pair programmer. Each part was planned as an epic spec ([`docs/epics/`](docs/epics)) and built on its own branch with a pull request that I reviewed before merging.
+I built this with **Claude Code** as a pair programmer. I planned each part as an epic spec ([`docs/epics/`](docs/epics)), built it on its own branch, and reviewed the pull request before merging.
 
-**Where I changed what the AI proposed:**
-- **Layering.** The first version put business logic in the persistence layer: change detection ran inside the snapshot repository, and routes held rules like "duplicate → 409". I had it restructured into routes → services → repositories. The service owns the transaction and calls a pure change-detection function, and domain errors map to HTTP in one place.
-- **LLM for every change.** The AI sent every change to the LLM, including a plain price change. I asked why a price change needs an LLM call at all. Now price, title and availability changes are summarised by our own code, and the 2,000/day cap is spent only on wording changes that need interpretation.
-- **Readability.** I had the source client's retry loop rewritten into a pure response classifier plus an explicit retry policy, comments cut back to Javadoc-style docs, and methods renamed so each layer has its own vocabulary (`competitorService.startTracking` vs `competitorRepository.insert`).
-- **The prompt.** I asked for a system prompt that explains the goal (competitive intelligence for a product manager) and for the current listing to be sent as context, so the model understands the product and not just the changed field.
+Where I changed what the AI proposed:
+- **LLM for every change.** It sent every change to the LLM, including a plain price change. I asked why a price change needs an LLM at all. Now code writes summaries for price, title and availability, and the cap is spent only on wording.
+- **Layering.** The first version put business logic in the persistence layer: change detection ran inside the snapshot repository, and routes held rules like "duplicate → 409". I had it split into routes → services → repositories. The service owns the transaction and calls a pure change-detection function, and domain errors map to HTTP in one place.
+- **Readability.** I had the source client's retry loop split into a pure response classifier plus an explicit retry policy, comments cut back, and methods renamed so each layer has its own vocabulary (`competitorService.startTracking` vs `competitorRepository.insert`).
+- **The prompt.** I asked for a system prompt that explains the goal (competitive intelligence for a product manager) and for the current listing to be sent as context, so the model understands the product, not just the changed field.
