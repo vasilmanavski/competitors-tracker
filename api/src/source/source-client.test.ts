@@ -4,7 +4,7 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { createRateLimiter } from "./rate-limiter.ts";
-import { createSourceClient, parseRetryAfter } from "./source-client.ts";
+import { backoffDelayMs, classifyResponse, createSourceClient, parseRetryAfter } from "./source-client.ts";
 
 type Step = (res: ServerResponse) => void;
 let script: Step[] = [];
@@ -152,5 +152,31 @@ describe("parseRetryAfter", () => {
     assert.equal(parseRetryAfter("Thu, 01 Jan 1970 00:00:05 GMT", 0), 5000);
     assert.equal(parseRetryAfter(null), null);
     assert.equal(parseRetryAfter("soon"), null);
+  });
+});
+
+describe("classifyResponse", () => {
+  test("maps each status class to what the retry policy should do", () => {
+    assert.deepEqual(classifyResponse(200, null, '{"title":"Acme"}'), { kind: "ok", body: { title: "Acme" } });
+    assert.deepEqual(classifyResponse(404, null, ""), { kind: "not_found" });
+    assert.deepEqual(classifyResponse(429, "2", ""), { kind: "rate_limited", retryAfterMs: 2000 });
+    assert.deepEqual(classifyResponse(429, null, ""), { kind: "rate_limited", retryAfterMs: 1000 });
+    assert.deepEqual(classifyResponse(503, null, "<html>"), { kind: "transient_error", error: "HTTP 503" });
+    assert.deepEqual(classifyResponse(400, null, ""), { kind: "permanent_error", error: "HTTP 400" });
+    assert.deepEqual(classifyResponse(200, null, "<html>"), {
+      kind: "transient_error",
+      error: "response was not valid JSON",
+    });
+  });
+});
+
+describe("backoffDelayMs", () => {
+  test("triples each attempt, with ±25% jitter", () => {
+    const noJitter = () => 0.5;
+    assert.equal(backoffDelayMs(1, 500, noJitter), 500);
+    assert.equal(backoffDelayMs(2, 500, noJitter), 1500);
+    assert.equal(backoffDelayMs(3, 500, noJitter), 4500);
+    assert.equal(backoffDelayMs(1, 500, () => 0), 375);
+    assert.equal(backoffDelayMs(1, 500, () => 1), 625);
   });
 });

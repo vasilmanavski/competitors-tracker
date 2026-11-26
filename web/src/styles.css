@@ -1,0 +1,86 @@
+body {
+  font-family: system-ui, sans-serif;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.brand {
+  color: inherit;
+  text-decoration: none;
+}
+
+.muted {
+  color: gray;
+}
+
+.error {
+  color: crimson;
+}
+
+.changed-badge {
+  color: darkorange;
+}
+
+.warning-badge {
+  color: crimson;
+}
+
+.competitor-row {
+  margin-bottom: 0.4rem;
+}
+
+.timeline {
+  padding: 0;
+}
+
+.snapshot {
+  list-style: none;
+  border-left: 4px solid #ddd;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.snapshot--changed {
+  border-left-color: darkorange;
+}
+
+.snapshot-fields {
+  margin: 0.4rem 0;
+}
+
+.snapshot-fields th {
+  text-align: left;
+  vertical-align: top;
+  padding-right: 1rem;
+  font-weight: normal;
+  color: gray;
+}
+
+.field--changed {
+  background: #fff3cd;
+  font-weight: 600;
+}
+
+.snapshot-summary {
+  margin: 0.25rem 0;
+}
+
+.status--ok {
+  color: seagreen;
+}
+
+.status--partial {
+  color: darkgoldenrod;
+}
+
+.status--not_found {
+  color: gray;
+}
+
+.status--fetch_failed {
+  color: crimson;
+}

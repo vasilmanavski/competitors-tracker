@@ -1,36 +1,47 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { RateLimiter } from "./rate-limiter.ts";
 
-// HTTP client for the listing source. It treats the source as an unreliable
-// third-party website and turns every way a request can go wrong into a plain
-// result value. The only thing it throws is an abort from the caller (shutdown).
-
+/** What the rest of the system gets back from one poll of the source. */
 export type FetchResult =
   | { kind: "ok"; body: unknown }
   | { kind: "not_found" }
   | { kind: "failed"; error: string; attempts: number };
 
-type Attempt =
-  | FetchResult
-  | { kind: "retryable"; error: string }
-  | { kind: "rate_limited"; retryAfterMs: number };
+/** What a single HTTP request told us. */
+type SingleResponse =
+  | { kind: "ok"; body: unknown }
+  | { kind: "not_found" }
+  | { kind: "rate_limited"; retryAfterMs: number }
+  | { kind: "transient_error"; error: string }
+  | { kind: "permanent_error"; error: string };
 
 export type SourceClientOptions = {
   baseUrl: string;
   limiter: RateLimiter;
-  timeoutMs: number; // per attempt (decision 2.9)
-  maxRetries: number; // extra attempts after 5xx / timeout / network / non-JSON
-  backoffMs?: number; // first retry delay; tripled each time, plus jitter
-  max429Retries?: number; // safety net so one poll can't loop forever
-  maxRetryAfterMs?: number; // cap on a Retry-After we are willing to honour
+  /** Per attempt, covering the whole exchange including the body. */
+  timeoutMs: number;
+  /** Extra attempts after a transient error (5xx, timeout, network, invalid JSON). */
+  maxRetries: number;
+  backoffMs?: number;
+  /** Stops one poll from waiting on 429s forever. */
+  max429Retries?: number;
+  maxRetryAfterMs?: number;
   fetchImpl?: typeof fetch;
 };
 
+/** Fetches listings from the source; every failure comes back as a value, never as an exception. */
 export type SourceClient = {
   fetchListing(id: string, signal?: AbortSignal): Promise<FetchResult>;
 };
 
-// Retry-After is either delay-seconds or an HTTP date (RFC 9110).
+const DEFAULT_BACKOFF_MS = 500;
+const DEFAULT_MAX_429_RETRIES = 30;
+const DEFAULT_MAX_RETRY_AFTER_MS = 120_000;
+const RETRY_AFTER_FALLBACK_MS = 1000;
+const BACKOFF_FACTOR = 3;
+const JITTER = 0.25;
+
+/** Retry-After is either delay-seconds or an HTTP date (RFC 9110). */
 export function parseRetryAfter(header: string | null, now = Date.now()): number | null {
   if (header === null) return null;
   const trimmed = header.trim();
@@ -39,95 +50,110 @@ export function parseRetryAfter(header: string | null, now = Date.now()): number
   return Number.isNaN(date) ? null : Math.max(0, date - now);
 }
 
-function describeError(err: unknown, timeoutMs: number): string {
-  if (err instanceof Error) {
-    if (err.name === "TimeoutError") return `timeout after ${timeoutMs} ms`;
-    const cause = err.cause as { code?: unknown; message?: unknown } | undefined;
-    const detail = typeof cause?.code === "string" ? cause.code : typeof cause?.message === "string" ? cause.message : err.message;
-    return `network error: ${detail}`;
+/** Maps one HTTP response to what the retry policy should do with it. */
+export function classifyResponse(status: number, retryAfter: string | null, bodyText: string): SingleResponse {
+  if (status === 404) return { kind: "not_found" };
+  if (status === 429) {
+    return { kind: "rate_limited", retryAfterMs: parseRetryAfter(retryAfter) ?? RETRY_AFTER_FALLBACK_MS };
   }
-  return `network error: ${String(err)}`;
+  if (status >= 500) return { kind: "transient_error", error: `HTTP ${status}` };
+  if (status < 200 || status >= 300) return { kind: "permanent_error", error: `HTTP ${status}` };
+
+  try {
+    return { kind: "ok", body: JSON.parse(bodyText) as unknown };
+  } catch {
+    return { kind: "transient_error", error: "response was not valid JSON" };
+  }
 }
 
-// "HTTP 502 (3 attempts)" when every attempt failed the same way, otherwise
-// each attempt in order: "3 attempts: HTTP 503, HTTP 503, timeout after 5000 ms".
+/** Exponential backoff (500 ms, 1.5 s, 4.5 s …) with ±25% jitter. `failedAttempts` starts at 1. */
+export function backoffDelayMs(failedAttempts: number, baseMs: number, random = Math.random): number {
+  const exponential = baseMs * BACKOFF_FACTOR ** (failedAttempts - 1);
+  const jitter = 1 - JITTER + random() * 2 * JITTER;
+  return exponential * jitter;
+}
+
+function describeError(err: unknown, timeoutMs: number): string {
+  if (!(err instanceof Error)) return `network error: ${String(err)}`;
+  if (err.name === "TimeoutError") return `timeout after ${timeoutMs} ms`;
+  const cause = err.cause as { code?: unknown; message?: unknown } | undefined;
+  if (typeof cause?.code === "string") return `network error: ${cause.code}`;
+  if (typeof cause?.message === "string") return `network error: ${cause.message}`;
+  return `network error: ${err.message}`;
+}
+
+/** "HTTP 502 (3 attempts)" when all attempts failed alike, else "3 attempts: HTTP 503, HTTP 502, timeout after 5000 ms". */
 function describeAttempts(errors: string[]): string {
   if (errors.length === 1) return `${errors[0]} (1 attempt)`;
   if (errors.every((e) => e === errors[0])) return `${errors[0]} (${errors.length} attempts)`;
   return `${errors.length} attempts: ${errors.join(", ")}`;
 }
 
+/** Creates the HTTP client for `GET {baseUrl}/listings/:id`. */
 export function createSourceClient(options: SourceClientOptions): SourceClient {
-  const {
-    limiter,
-    timeoutMs,
-    maxRetries,
-    backoffMs = 500,
-    max429Retries = 30,
-    maxRetryAfterMs = 120_000,
-    fetchImpl = fetch,
-  } = options;
-  const base = options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`;
+  const { limiter, timeoutMs, maxRetries, fetchImpl = fetch } = options;
+  const backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
+  const max429Retries = options.max429Retries ?? DEFAULT_MAX_429_RETRIES;
+  const maxRetryAfterMs = options.maxRetryAfterMs ?? DEFAULT_MAX_RETRY_AFTER_MS;
+  const baseUrl = options.baseUrl.endsWith("/") ? options.baseUrl : `${options.baseUrl}/`;
 
-  async function attempt(id: string, signal?: AbortSignal): Promise<Attempt> {
-    const url = new URL(`listings/${encodeURIComponent(id)}`, base);
+  /** Sends one request. Throws only when the caller aborts. */
+  async function requestOnce(id: string, signal?: AbortSignal): Promise<SingleResponse> {
+    const url = new URL(`listings/${encodeURIComponent(id)}`, baseUrl);
     const timeout = AbortSignal.timeout(timeoutMs);
     try {
-      // The timeout covers the whole exchange, body included: the source can
-      // send headers and then stall, or never answer at all.
       const res = await fetchImpl(url, {
         headers: { accept: "application/json" },
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
-      const text = await res.text();
-
-      if (res.status === 404) return { kind: "not_found" };
-      if (res.status === 429) {
-        const retryAfterMs = parseRetryAfter(res.headers.get("retry-after")) ?? 1000;
-        return { kind: "rate_limited", retryAfterMs: Math.min(retryAfterMs, maxRetryAfterMs) };
-      }
-      if (res.status >= 500) return { kind: "retryable", error: `HTTP ${res.status}` };
-      if (!res.ok) return { kind: "failed", error: `HTTP ${res.status}`, attempts: 1 };
-
-      try {
-        return { kind: "ok", body: JSON.parse(text) as unknown };
-      } catch {
-        return { kind: "retryable", error: "response was not valid JSON" };
-      }
+      const bodyText = await res.text();
+      return classifyResponse(res.status, res.headers.get("retry-after"), bodyText);
     } catch (err) {
-      if (signal?.aborted) throw err; // shutdown: let the caller drop this poll
-      return { kind: "retryable", error: describeError(err, timeoutMs) };
+      if (signal?.aborted) throw err;
+      return { kind: "transient_error", error: describeError(err, timeoutMs) };
     }
   }
 
-  return {
-    async fetchListing(id, signal) {
-      let attempts = 0;
-      let rateLimited = 0;
-      const errors: string[] = [];
-      for (;;) {
-        await limiter.acquire(signal);
-        const result = await attempt(id, signal);
+  /**
+   * Fetches one listing with two retry budgets: a 429 pauses the shared limiter for
+   * Retry-After and asks again (not counted as a failed attempt); a transient error
+   * backs off and retries up to `maxRetries`.
+   */
+  async function fetchListing(id: string, signal?: AbortSignal): Promise<FetchResult> {
+    const failures: string[] = [];
+    let rateLimitedCount = 0;
 
-        if (result.kind === "rate_limited") {
-          // Not counted as a failed attempt: the request was refused, not broken.
-          limiter.pauseFor(result.retryAfterMs);
-          if (++rateLimited > max429Retries) {
-            return { kind: "failed", error: `still rate limited after ${rateLimited} tries`, attempts };
+    while (true) {
+      await limiter.acquire(signal);
+      const response = await requestOnce(id, signal);
+
+      switch (response.kind) {
+        case "ok":
+        case "not_found":
+          return response;
+
+        case "permanent_error":
+          return { kind: "failed", error: response.error, attempts: failures.length + 1 };
+
+        case "rate_limited":
+          limiter.pauseFor(Math.min(response.retryAfterMs, maxRetryAfterMs));
+          rateLimitedCount++;
+          if (rateLimitedCount > max429Retries) {
+            const error = `still rate limited after ${rateLimitedCount} tries`;
+            return { kind: "failed", error, attempts: failures.length };
           }
-          continue;
-        }
+          break;
 
-        attempts++;
-        if (result.kind === "retryable") {
-          errors.push(result.error);
-          if (attempts > maxRetries) return { kind: "failed", error: describeAttempts(errors), attempts };
-          const delay = backoffMs * 3 ** (attempts - 1) * (0.75 + Math.random() * 0.5);
-          await sleep(delay, undefined, { signal });
-          continue;
-        }
-        return result.kind === "failed" ? { ...result, attempts } : result;
+        case "transient_error":
+          failures.push(response.error);
+          if (failures.length > maxRetries) {
+            return { kind: "failed", error: describeAttempts(failures), attempts: failures.length };
+          }
+          await sleep(backoffDelayMs(failures.length, backoffMs), undefined, { signal });
+          break;
       }
-    },
-  };
+    }
+  }
+
+  return { fetchListing };
 }

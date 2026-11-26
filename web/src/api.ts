@@ -1,7 +1,3 @@
-// Thin typed client for the API contract. Every call goes to same-origin /api
-// (Vite proxy in dev, nginx in Docker). Non-2xx responses become ApiError with
-// the server's { message }, so views can show it inline.
-
 export type SnapshotStatus = "ok" | "partial" | "not_found" | "fetch_failed";
 export type ListingState = "unknown" | "listed" | "never_listed" | "delisted";
 
@@ -41,6 +37,7 @@ export type Snapshot = {
   error: string | null;
 };
 
+/** A non-2xx API response, carrying the server's `{ message }`. */
 export class ApiError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -49,17 +46,21 @@ export class ApiError extends Error {
   }
 }
 
+async function messageOf(res: Response): Promise<string> {
+  const body: unknown = await res.json().catch(() => null);
+  const hasMessage = typeof body === "object" && body !== null && "message" in body && typeof body.message === "string";
+  return hasMessage ? (body.message as string) : `API answered ${res.status}`;
+}
+
+/** Same-origin call to the API. @throws ApiError on a non-2xx response */
 async function request(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(path, init);
-  if (!res.ok) {
-    const body: unknown = await res.json().catch(() => null);
-    const message =
-      body && typeof body === "object" && "message" in body && typeof body.message === "string"
-        ? body.message
-        : `API answered ${res.status}`;
-    throw new ApiError(res.status, message);
-  }
+  if (!res.ok) throw new ApiError(res.status, await messageOf(res));
   return res;
+}
+
+function competitorPath(id: string): string {
+  return `/api/competitors/${encodeURIComponent(id)}`;
 }
 
 export async function listCompetitors(signal?: AbortSignal): Promise<Competitor[]> {
@@ -76,9 +77,10 @@ export async function addCompetitor(id: string): Promise<Competitor> {
 }
 
 export async function removeCompetitor(id: string): Promise<void> {
-  await request(`/api/competitors/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await request(competitorPath(id), { method: "DELETE" });
 }
 
+/** One page of a competitor's timeline, newest first; `before` loads older snapshots. */
 export async function listSnapshots(
   id: string,
   opts: { before?: string; limit?: number; signal?: AbortSignal } = {},
@@ -86,6 +88,6 @@ export async function listSnapshots(
   const query = new URLSearchParams();
   if (opts.limit) query.set("limit", String(opts.limit));
   if (opts.before) query.set("before", opts.before);
-  const qs = query.toString() ? `?${query}` : "";
-  return (await request(`/api/competitors/${encodeURIComponent(id)}/snapshots${qs}`, { signal: opts.signal })).json();
+  const queryString = query.size > 0 ? `?${query}` : "";
+  return (await request(`${competitorPath(id)}/snapshots${queryString}`, { signal: opts.signal })).json();
 }

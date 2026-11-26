@@ -6,15 +6,17 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import { sql } from "drizzle-orm";
 import { buildApp } from "../app.ts";
 import { createDb, runMigrations } from "../db/client.ts";
-import { snapshotRepository } from "../snapshots/repository.ts";
+import { createServices } from "../services.ts";
 import type { FetchResult, SourceClient } from "../source/source-client.ts";
-import { createPoller } from "./poller.ts";
+import { createPollingService } from "./service.ts";
 import { createScheduler } from "./scheduler.ts";
 
 const url = process.env.TEST_DATABASE_URL ?? "postgres://localhost:5432/competitorpulse_test";
 const { pool, db } = createDb(url);
-const app = buildApp({ db }, { logger: false });
-const snapshots = snapshotRepository(db);
+const services = createServices(db);
+const app = buildApp(services, { logger: false });
+const competitors = services.data.repositories.competitors;
+const claimDueHourly = (limit: number, excludeIds: string[]) => competitors.claimDue(limit, 3600, excludeIds);
 const silent = { info() {}, warn() {}, error() {} };
 
 // Each fetchListing() returns the next scripted result for that id.
@@ -26,7 +28,13 @@ const source: SourceClient = {
     return next;
   },
 };
-const poll = createPoller({ source, snapshots, log: silent });
+const poll = createPollingService({
+  source,
+  snapshots: services.snapshots,
+  competitors,
+  intervalSeconds: 3600,
+  log: silent,
+}).pollCompetitor;
 
 const body = (patch: Record<string, unknown> = {}) => ({
   kind: "ok" as const,
@@ -175,18 +183,17 @@ describe("scheduling", () => {
   test("claimDue: due rows once, oldest first, limited, then not again within the interval", async () => {
     for (const id of ["a", "b", "c"]) await add(id);
     await db.execute(sql`update competitors set next_poll_at = now() - interval '1 minute' where id = 'c'`);
-    assert.deepEqual(await snapshots.claimDue(1, 60), ["c"]);
-    assert.deepEqual((await snapshots.claimDue(10, 60, ["a"])).sort(), ["b"]);
-    assert.deepEqual((await snapshots.claimDue(10, 60)).sort(), ["a"]);
-    assert.deepEqual(await snapshots.claimDue(10, 60), []);
+    assert.deepEqual(await competitors.claimDue(1, 60), ["c"]);
+    assert.deepEqual((await competitors.claimDue(10, 60, ["a"])).sort(), ["b"]);
+    assert.deepEqual((await competitors.claimDue(10, 60)).sort(), ["a"]);
+    assert.deepEqual(await competitors.claimDue(10, 60), []);
   });
 
   test("scheduler polls due competitors; one crashing poll doesn't stop the others", async () => {
     for (const id of ["ok-1", "boom", "ok-2"]) await add(id);
     const polled: string[] = [];
     const scheduler = createScheduler({
-      snapshots,
-      intervalSeconds: 3600,
+      claimDue: claimDueHourly,
       maxInFlight: 10,
       tickMs: 20,
       log: silent,
@@ -208,8 +215,7 @@ describe("scheduling", () => {
     let running = 0;
     let peak = 0;
     const scheduler = createScheduler({
-      snapshots,
-      intervalSeconds: 3600,
+      claimDue: claimDueHourly,
       maxInFlight: 2,
       tickMs: 10,
       log: silent,
