@@ -315,65 +315,25 @@ button:disabled {
 }
 
 .quiet-run {
-  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.15rem 0 0.9rem;
+  font-size: 0.75rem;
+  color: var(--muted);
   animation: fade-in 0.4s ease-out;
 }
 
-.quiet-run-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  width: 100%;
-  padding: 0.4rem 0.65rem;
-  font-size: 0.85rem;
-  text-align: left;
-  background: #f7f7f8;
-  border: 1px solid transparent;
-  border-radius: 4px;
+.quiet-run::before,
+.quiet-run::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--border);
 }
 
-.quiet-run-toggle:hover {
-  background: #efeff1;
-  border-color: var(--border);
-}
-
-.quiet-run-icon {
-  width: 1rem;
+.quiet-run-text {
+  max-width: 85%;
   text-align: center;
-  font-weight: 700;
-}
-
-.quiet-run--unchanged .quiet-run-icon {
-  color: #2e7d32;
-}
-
-.quiet-run--still_not_listed .quiet-run-icon {
-  color: var(--muted);
-}
-
-.quiet-run-chevron {
-  width: 0.45rem;
-  height: 0.45rem;
-  margin: 0 0.2rem 0 auto;
-  border-right: 2px solid var(--muted);
-  border-bottom: 2px solid var(--muted);
-  transform: rotate(-45deg);
-  transition: transform 0.15s ease-out;
-}
-
-.quiet-run-toggle[aria-expanded="true"] .quiet-run-chevron {
-  transform: rotate(45deg);
-}
-
-.quiet-run-checks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.9rem;
-  margin: 0.35rem 0 0;
-  padding: 0 0.65rem 0 2.05rem;
-  font-size: 0.78rem;
-  color: var(--muted);
-  list-style: none;
 }
 
 @keyframes spin {
