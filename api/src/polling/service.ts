@@ -2,7 +2,7 @@ import type { CompetitorRepository } from "../competitors/repository.ts";
 import type { PollOutcome } from "../listings/change-detection.ts";
 import { normalizeListing } from "../listings/normalize.ts";
 import type { SnapshotService } from "../snapshots/service.ts";
-import type { FetchResult, SourceClient } from "../source/source-client.ts";
+import type { FetchResult, SourceClient } from "../clients/listing-source/source-client.ts";
 
 export type PollLogger = {
   info(obj: object, msg: string): void;

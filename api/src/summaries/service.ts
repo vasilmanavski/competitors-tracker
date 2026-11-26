@@ -3,7 +3,7 @@ import type { SummaryStatus } from "../db/schema.ts";
 import type { ChangedField } from "../listings/change-detection.ts";
 import { type DisplayListing, type FieldChange, toDisplayListing } from "../listings/field-changes.ts";
 import { priceOf, type Snapshot, type SummaryUpdate } from "../snapshots/repository.ts";
-import type { CompletionResult, LlmClient } from "./llm-client.ts";
+import type { CompletionResult, LlmClient } from "../clients/llm/llm-client.ts";
 import { buildSummaryPrompt } from "./prompt.ts";
 import { checkSummary } from "./summary-check.ts";
 

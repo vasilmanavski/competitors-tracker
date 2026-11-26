@@ -1,7 +1,5 @@
+import type { ChatMessage } from "../clients/llm/llm-client.ts";
 import type { DisplayListing, FieldChange } from "../listings/field-changes.ts";
-
-/** The chat messages for one summary request, in the OpenAI Chat Completions shape. */
-export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 const MAX_VALUE_CHARS = 500;
 
