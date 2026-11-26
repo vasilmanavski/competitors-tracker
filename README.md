@@ -33,7 +33,7 @@ Open **http://localhost:8080**. Track `acme-crm`; its first poll lands within ab
 Migrations run automatically when the API starts.
 
 ### Without Docker
-Needs Node ≥ 22.18, Python 3 and a local PostgreSQL.
+Needs Node ≥ 24 (npm ≥ 11.19; see `.nvmrc`), Python 3 and a local PostgreSQL.
 ```bash
 npm run setup      # installs everything, creates the DB, copies api/.env.example → api/.env
 npm run dev:all    # source :4002, mock LLM :4001, API :3000, web :5173

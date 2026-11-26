@@ -38,7 +38,7 @@ The brief scores one-command startup ("`docker compose up` must start the whole 
 | 0.4 | Database: PostgreSQL. Alternative considered: SQLite. It's simpler, but a weak story for 6,000 competitors × 90 days. | **PROPOSED** |
 | 0.5 | ORM + migrations: Drizzle (`drizzle-kit generate` → SQL files, applied at startup). Alternatives: Prisma (its CLI just changed in v8, so tutorials disagree), Knex (weak typing). | **PROPOSED** |
 | 0.6 | HTTP framework: Fastify v5 + Zod validation. Alternative: Express (most familiar, but no built-in validation or typed routes). | **PROPOSED** |
-| 0.7 | Run TS natively on Node ≥ 22.18 (type stripping) + `tsc --noEmit` for type checks. Alternatives: `tsx`, or compiling to `dist/`. | **PROPOSED** |
+| 0.7 | Run TS natively on Node ≥ 22.18 (type stripping; raised to Node 24 in Epic 4 to match the npm that writes the lockfiles) + `tsc --noEmit` for type checks. Alternatives: `tsx`, or compiling to `dist/`. | **PROPOSED** |
 | 0.8 | The provided source and mock LLM run unmodified as their own compose services. They are reached only through env URLs, so graders can swap them out. | **DECIDED** (brief) |
 
 ### Config (env)

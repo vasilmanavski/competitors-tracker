@@ -24,7 +24,7 @@ services:
 
   # Provided listing source, run unmodified.
   listing-source:
-    image: node:22-alpine
+    image: node:24-alpine
     working_dir: /srv
     command: ["node", "listing-source-server.mjs"]
     volumes:
@@ -35,7 +35,7 @@ services:
     ports:
       - "4002:4002"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:4002/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4002/health"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -53,7 +53,7 @@ services:
     ports:
       - "4001:4001"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:4001/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4001/health"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -84,7 +84,7 @@ services:
       mock-llm:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
       interval: 3s
       timeout: 3s
       retries: 30
@@ -97,7 +97,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 3s
       timeout: 3s
       retries: 30

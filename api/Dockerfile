@@ -1,7 +1,7 @@
 # Runs TypeScript directly: Node >= 22.18 strips types natively, so there is
 # no build step and no dist/ folder. Type checking is a separate concern
 # (`npm run typecheck`), not part of starting the app.
-FROM node:22-alpine
+FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 
