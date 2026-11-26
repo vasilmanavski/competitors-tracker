@@ -8,7 +8,8 @@
     "dev:llm": "cd provided/mock-llm && python3 -u mock-llm-server.py",
     "dev:api": "npm --prefix api run dev",
     "dev:web": "npm --prefix web run dev",
-    "typecheck": "npm --prefix api run typecheck && npm --prefix web run typecheck"
+    "typecheck": "npm --prefix api run typecheck && npm --prefix web run typecheck",
+    "test": "npm --prefix api test"
   },
   "devDependencies": {
     "concurrently": "^10.0.7"

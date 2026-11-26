@@ -45,7 +45,7 @@ Extra fields can be added to the list response later (e.g. `changedLast24h` in E
 | 1.2 | **Unknown id → accept (201)** and schedule it for polling right away. The timeline then shows `not_found`. We never reject on a source 404, because 404 also means "temporarily delisted", and a request-time check against a rate-limited, flaky source would make `POST` flaky too. | **PROPOSED** |
 | 1.3 | Id validation: trim + lowercase, must match `^[a-z0-9-]{1,64}$`. Otherwise 400 with a message. | **PROPOSED** |
 | 1.4 | Duplicate add → **409 Conflict**. Alternative: idempotent 201. | **PROPOSED** |
-| 1.5 | Delete of an unknown id → 404. Alternative: idempotent 204. | **OPEN** |
+| 1.5 | Delete of an unknown id → 404. Alternative: idempotent 204. | **PROPOSED** (implemented as 404; the UI just re-fetches, so either answer works) |
 
 ## Failure modes
 - Malformed id → 400, the error is shown inline in the form.
@@ -53,7 +53,14 @@ Extra fields can be added to the list response later (e.g. `changedLast24h` in E
 - API unreachable → the UI shows an error state, not a blank list.
 
 ## Stories
-_To be derived when this epic starts._
+_Implemented 2026-11-26 using the PROPOSED choices 1.2–1.5. Confirm or change them in review._
+
+1. **Table + migration**: `competitors` in `api/src/db/schema.ts`, generated as `api/drizzle/0001_competitors.sql`.
+2. **Id rule**: `api/src/competitors/competitor-id.ts`. One Zod schema (trim → lowercase → regex) used by both `POST` and `DELETE`.
+3. **Repository**: `api/src/competitors/repository.ts`. Duplicate detection is `INSERT … ON CONFLICT DO NOTHING RETURNING`, a single statement, so two concurrent adds can't both get 201.
+4. **Routes**: `api/src/competitors/routes.ts`. Error bodies are always `{ message }`. `POST` returns the created row (`{ id, createdAt }`); the list also includes `createdAt` and is ordered by add time.
+5. **Tests**: `api/src/competitors/routes.test.ts`, `node:test` + `app.inject()` against a real Postgres test DB (`npm --prefix api run test:db` once, then `npm test`).
+6. **UI**: `web/src/api.ts` (typed client, turns non-2xx into `ApiError` with the server message) and `web/src/CompetitorList.tsx` (list, add form, remove, inline errors, loading/empty/error states). After each add/remove it re-fetches instead of patching local state.
 
 ## Verification
 ```bash

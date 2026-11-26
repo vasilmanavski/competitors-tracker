@@ -1,10 +1,12 @@
 import Fastify from "fastify";
 import type { Db } from "./db/client.ts";
 import { sql } from "drizzle-orm";
+import { competitorRepository } from "./competitors/repository.ts";
+import { competitorRoutes } from "./competitors/routes.ts";
 
 // Builds the HTTP app without starting it, so tests can call app.inject().
-export function buildApp(deps: { db: Db }) {
-  const app = Fastify({ logger: true });
+export function buildApp(deps: { db: Db }, options: { logger?: boolean } = {}) {
+  const app = Fastify({ logger: options.logger ?? true });
 
   // Served on /health for ops (compose healthcheck, curl) and on /api/health
   // so the web app can reach it through the same /api proxy as everything else.
@@ -19,6 +21,8 @@ export function buildApp(deps: { db: Db }) {
       }
     });
   }
+
+  competitorRoutes(app, competitorRepository(deps.db));
 
   return app;
 }
