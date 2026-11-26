@@ -226,8 +226,14 @@ I didn't build it: it goes beyond the brief (summaries between consecutive snaps
 - **Notifications** (email/Slack) and **soft delete**.
 - **Browser e2e tests:** I tested the UI by hand in Chrome. Automated tests cover the API, the domain logic and the UI's grouping logic (157 API + 4 web tests).
 
-## AI tools
-I built this with **Claude Code** as a pair programmer. I planned each part as an epic spec ([`docs/epics/`](docs/epics)), built it on its own branch, and reviewed the pull request before merging.
+## How I worked, and AI tools
+I built this with **Claude Code** as a pair programmer, spec first. The AI implemented; I made the decisions. Full write-up: [`docs/workflow.md`](docs/workflow.md).
+
+1. **Brief first.** I pulled out what the brief requires, leaves open and scores, before any code.
+2. **Epics in a deliberate order:** setup and Docker first (so everything after runs in the real setup), then competitors, polling, AI summaries, and finally the README.
+3. **A spec per epic** ([`docs/epics/`](docs/epics)): goal, scope and out of scope, decisions marked DECIDED / PROPOSED / OPEN, failure modes, stories, and how to verify it.
+4. **One AI session per epic,** working from the spec on its own branch, merged through a PR I reviewed (#1–#4).
+5. **Refactors as separate PRs** after review (#5, #7, #8), and specs updated to match what was actually built.
 
 Where I changed what the AI proposed:
 - **LLM for every change.** It sent every change to the LLM, including a plain price change. I asked why a price change needs an LLM at all. Now code writes summaries for price, title and availability, and the cap is spent only on wording.
