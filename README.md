@@ -218,11 +218,33 @@ I didn't build it: it goes beyond the brief (summaries between consecutive snaps
 
 ---
 
+## How I'd deploy it
+I skipped the cloud bonus on purpose: the whole system starts with one command, so you can run it as is. This is how I'd put it online.
+
+### A demo: one VM, the same compose file
+- **One small Linux VM** (2 GB RAM) with Docker, then `git clone` and `docker compose up -d --build`. No code changes are needed: nginx in the web container already serves the UI and proxies `/api` to the API, so the app is reached on **one port** (8080).
+- **A firewall that allows only SSH and the web port.** The compose file also publishes Postgres (5433), the API (3000) and the two mock services. That's handy on a laptop, but on a public VM they must stay closed.
+- **HTTPS without buying a domain:** put Caddy in front, with a free `<ip>.sslip.io` hostname. Caddy gets the certificate by itself.
+- **A password:** there's no login (the brief assumes one internal user), so a public demo would get nginx basic auth.
+- Migrations run on startup, and `/health` reports whether the database is reachable, so a restart or redeploy is just `git pull && docker compose up -d --build`.
+
+### Production: split it by job
+- **Managed Postgres** (RDS, Cloud SQL, Neon) instead of the container: backups, point-in-time restore and failover come with it.
+- **The API and the background worker as separate services**, from the same image:
+  - API replicas with `SCHEDULER_ENABLED=false`, scaled on traffic behind a load balancer that checks `/health`.
+  - **One worker** with the scheduler on (polling, summaries, retention). Claiming and the LLM cap are already safe across instances, but the source rate limiter lives in one process (see section 4 above), so polling stays in a single worker until the limiter is shared.
+- **The web bundle as static files on a CDN** (S3 + CloudFront or similar), with `/api` routed to the API.
+- **Secrets from the platform** (the LLM key, the database URL) instead of the compose file. `SOURCE_BASE_URL` and `LLM_BASE_URL` point at the real source and LLM.
+- **Logs and alerts:** the JSON logs go to the platform's log service, with alerts on "summaries paused" (the LLM circuit breaker), repeated `fetch_failed` polls, and the daily cap running out early.
+- **CI:** typecheck and tests on each PR against a Postgres service container, then build and deploy the image on merge.
+
+---
+
 ## Left out on purpose
 - **Auth:** the brief assumes one internal user.
 - **The scaling steps above** (quiet-competitor intervals, partitioning, shared limiter, one summary per competitor, expiring stale summaries, batching): described, not built. Retention is built.
 - **Competitor trend summaries:** designed and tried on Ollama, not built.
-- **Cloud deployment** (bonus): skipped to keep the time reasonable.
+- **Cloud deployment** (bonus): skipped to keep the time reasonable. How I'd do it is described above.
 - **Fine-tuning:** no budget, not possible on the mock, and the problem is prompting, not model knowledge.
 - **Notifications** (email/Slack) and **soft delete**.
 - **Browser e2e tests:** I tested the UI by hand in Chrome. Automated tests cover the API, the domain logic and the UI's grouping logic (157 API + 4 web tests).
