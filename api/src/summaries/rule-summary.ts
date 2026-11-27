@@ -1,12 +1,7 @@
-import type { FieldChange } from "../listings/field-changes.ts";
+import { type FieldChange, priceChangePercent } from "../listings/field-changes.ts";
 import { parsePrice } from "../listings/normalize.ts";
 
 const TEXT_FIELDS: ReadonlySet<FieldChange["field"]> = new Set(["tagline", "description"]);
-
-function percentChange(before: number, after: number): string {
-  const percent = Math.round(((after - before) / before) * 100);
-  return `${percent > 0 ? "+" : ""}${percent}%`;
-}
 
 function describePrice(before: string | null, after: string | null): string {
   if (before === null || after === null) return `Price changed to ${after ?? "nothing"}.`;
@@ -14,9 +9,10 @@ function describePrice(before: string | null, after: string | null): string {
   if (!was || !now) return `Price changed from ${before} to ${after}.`;
   if (now.amount === 0) return `Now free (was ${before}).`;
   if (was.amount === 0) return `No longer free: now ${after}.`;
-  if (was.currency !== now.currency || was.period !== now.period) return `Price changed from ${before} to ${after}.`;
+  const percent = priceChangePercent(before, after);
+  if (percent === null) return `Price changed from ${before} to ${after}.`;
   const direction = now.amount < was.amount ? "dropped" : "rose";
-  return `Price ${direction} from ${before} to ${after} (${percentChange(was.amount, now.amount)}).`;
+  return `Price ${direction} from ${before} to ${after} (${percent > 0 ? "+" : ""}${percent}%).`;
 }
 
 function describe(change: FieldChange): string {

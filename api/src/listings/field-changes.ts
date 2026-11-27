@@ -52,13 +52,12 @@ export function describeChanges(
   );
 }
 
-/** "+34%" or "-26%" when both prices parse to the same currency and period and neither is free; else null. */
-export function priceChangePercent(before: string, after: string): string | null {
+/** The rounded percent change (34, -26) when both prices parse to the same currency and period and neither is free; else null. */
+export function priceChangePercent(before: string, after: string): number | null {
   const [was, now] = [parsePrice(before), parsePrice(after)];
   if (!was || !now || was.amount === 0 || now.amount === 0) return null;
   if (was.currency !== now.currency || was.period !== now.period) return null;
-  const percent = Math.round(((now.amount - was.amount) / was.amount) * 100);
-  return `${percent > 0 ? "+" : ""}${percent}%`;
+  return Math.round(((now.amount - was.amount) / was.amount) * 100);
 }
 
 /** Words appended, inserted or removed in a wording field while the rest stayed the same. */
