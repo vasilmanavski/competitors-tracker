@@ -72,7 +72,7 @@ export function createSnapshotService(data: DataAccess) {
         const changes = changesFor(decision, lastOk, outcome);
         const run = quietRunToExtend(decision, await snapshotRepository.findNewest(competitorId));
         const snapshot = run
-          ? await snapshotRepository.extendQuietRun(run.id, fetchedAt)
+          ? await snapshotRepository.extendQuietRun(run.id, fetchedAt, outcome)
           : await snapshotRepository.insert({
               competitorId,
               fetchedAt,

@@ -147,6 +147,17 @@ describe("polling → snapshots → timeline", () => {
     assert.equal((await listRow("acme-crm")).lastPolledAt, rows[0].lastCheckedAt);
   });
 
+  test("a quiet run keeps the latest wording the source used", async () => {
+    await add("acme-crm");
+    scripts.set("acme-crm", [body(), body({ price: "USD 39.00 per month" }), body({ price: "$39.00/mo" })]);
+    for (let i = 0; i < 3; i++) await poll("acme-crm");
+
+    const [run] = (await timeline("acme-crm")).rows;
+    assert.equal(run.checkCount, 2);
+    assert.equal(run.priceRaw, "$39.00/mo");
+    assert.equal(run.price, "$39/mo");
+  });
+
   test("an id the source never knew: not_found, flagged neverFound, never 'changed'", async () => {
     await add("qweqweqweqeqe");
     scripts.set("qweqweqweqeqe", [{ kind: "not_found" }, { kind: "not_found" }]);
@@ -203,6 +214,31 @@ describe("GET /api/competitors/:id/snapshots", () => {
     const page2 = (await timeline("acme-crm", `?limit=2&before=${encodeURIComponent(page1[1].fetchedAt)}`)).rows;
     const all = (await timeline("acme-crm")).rows;
     assert.deepEqual([...page1, ...page2].map((s: { id: number }) => s.id), all.slice(0, 4).map((s: { id: number }) => s.id));
+  });
+
+  test("paging across quiet runs returns every row once and every check", async () => {
+    await add("acme-crm");
+    scripts.set("acme-crm", [
+      body(), body(), body(), body(), // first + a run of 3
+      body({ price: "$29/mo" }), body({ price: "$29/mo" }), body({ price: "$29/mo" }), // change + a run of 2
+      body({ price: "$19/mo" }), body({ price: "$19/mo" }), // change + a run of 1
+    ]);
+    for (let i = 0; i < 9; i++) await poll("acme-crm");
+
+    const pages: { id: number; fetchedAt: string; checkCount: number }[][] = [];
+    let before = "";
+    for (;;) {
+      const qs = before ? `?limit=2&before=${encodeURIComponent(before)}` : "?limit=2";
+      const page = (await timeline("acme-crm", qs)).rows;
+      if (page.length === 0) break;
+      pages.push(page);
+      before = page.at(-1).fetchedAt;
+    }
+    const paged = pages.flat();
+    const all = (await timeline("acme-crm")).rows;
+    assert.equal(pages.length, 3);
+    assert.deepEqual(paged.map((s) => s.id), all.map((s: { id: number }) => s.id));
+    assert.equal(paged.reduce((total, s) => total + s.checkCount, 0), 9);
   });
 });
 
