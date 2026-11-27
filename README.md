@@ -163,11 +163,11 @@ Next:
 - **Poll new competitors first.** A new one currently waits behind overdue ones; defaulting its `next_poll_at` to the past is a one-line fix.
 
 ### 2. 2,000 LLM calls a day
-Spend can't go over 2,000; the question is whether every change still gets a summary.
+Spend can't go over 2,000; the question is whether every change still gets a summary. The table shows what each design choice saves, starting from the naive approach.
 
 | Step | Calls/day left |
 |---|---|
-| One call per poll (6,000 × 96) | 576,000 |
+| *Naive:* summarise every poll, 6,000 × 96 (we don't) | 576,000 |
 | Only real changes: noise, price formats, partial and failed responses don't count | = real changes/day |
 | Code summaries for price, title and availability | = wording changes/day |
 | The cap; the rest waits for the next UTC day, old → new still shown | ≤ 2,000 |
@@ -195,7 +195,7 @@ A second instance is only worth it for **availability**. Claiming and the LLM ca
 ---
 
 ## Beyond the brief
-- **Competitor trends:** per-change summaries mostly restate the old → new diff. With real data I'd rather spend the budget on an on-demand trend summary per competitor ("where is this competitor heading?"). I tried it on llama3.2 and it got the big picture right but two details wrong, so it needs the maths done in code and its citations checked. Not built. Details: [`docs/competitor-trends.md`](docs/competitor-trends.md).
+- **Where I'd really spend the LLM: competitor trends.** Honestly, I don't find the per-change AI summaries that valuable. These are four short fields, and the old → new diff already shows what changed at a glance. That's also why price, title and availability changes get a summary written by plain code. What a person can't see at a glance is the pattern across many changes, so I'd use the LLM for an on-demand trend summary per competitor over the last X weeks ("where is this competitor heading?"). I tried it on llama3.2 and it got the big picture right but two details wrong, so it needs the maths done in code and its citations checked. Not built. Details: [`docs/competitor-trends.md`](docs/competitor-trends.md).
 - **Deployment:** I skipped the cloud bonus. For a demo: one 2 GB VM running the same `docker compose up`, a firewall allowing only SSH and port 8080, and Caddy with a free `<ip>.sslip.io` hostname for HTTPS. For production: managed Postgres, one instance that the platform restarts on a failing `/health`, and secrets from the platform. Details: [`docs/deploy.md`](docs/deploy.md).
 
 ## Left out on purpose
