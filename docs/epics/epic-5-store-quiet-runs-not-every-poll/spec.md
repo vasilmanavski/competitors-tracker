@@ -2,7 +2,7 @@
 
 > Status legend: **DECIDED** = confirmed by me · **PROPOSED** = recommended, not yet confirmed · **OPEN** = still to decide
 >
-> **Status: implemented (2026-11-27, branch `epic-5-quiet-run-storage`), PR open for review.**
+> **Status: done** — implemented and merged 2026-11-27 (PR #10, squash-merged). This spec reflects the final state.
 
 ## Goal
 **In one line:** a stretch of uneventful polls is stored as one row with a check count, not one row per poll.
