@@ -68,7 +68,7 @@ SOURCE_BASE_URL=http://host.docker.internal:5002
 The backend only talks to the source over this URL. It never reads the source's files.
 
 ### Which LLM
-I used **the provided mock LLM**: no cost, no key to share. It doesn't write real summaries. It echoes the first 160 characters of the prompt, so a "summary" looks like `Mock AI summary (not a real model). Based on what you sent: "Old tagline: …"`. I put the changes first in the prompt so the echo shows what was sent.
+I used **the provided mock LLM**: no cost, no key to share. It doesn't write real summaries. It echoes the first 160 characters of the prompt, so a "summary" looks like `Mock AI summary (not a real model). Based on what you sent: "Changed fields (1): tagline. Old tagline: …"`. I put the changes first in the prompt so the echo shows what was sent.
 
 The client speaks the OpenAI Chat Completions format, so switching provider is just config:
 ```bash
@@ -137,7 +137,7 @@ The full reasoning for each part is in [`docs/epics/`](docs/epics).
 ### The LLM and the cap
 - **A poll never waits for the LLM.** The snapshot is saved first. A separate summary worker makes the call (same `SKIP LOCKED` pattern, newest change first, 120 s lease). A slow or failing LLM can't lose or delay a poll.
 - **Code for structured changes, LLM for wording.** A price, title or availability change is summarised by code at poll time: free, instant, and never a wrong number.
-- **Prompt:** the changes as labelled `Old …` / `New …` lines, then the current listing as context, never the raw response. The system prompt asks what changed and what it likely signals for a product manager, with two worked examples. Listing text is treated as data. This came from testing on llama3.2: an inline `"a" → "b"` format made it invent or reverse values in 4 out of 4 runs, and labelled lines fixed it.
+- **Prompt:** the changes as labelled `Old …` / `New …` lines, then the current listing as context, never the raw response. The system prompt asks what changed and what it likely signals for a product manager, with two worked examples. Listing text is treated as data. This came from testing on llama3.2: an inline `"a" → "b"` format made it invent or reverse values in 4 out of 4 runs, and labelled lines fixed it. With several changes it first summarised only the most striking one (usually the price). The prompt now lists the changed fields up front, states the price change in words ("up 34%"), spells out an appended or removed sentence, and asks for every field plus one combined read. That took it from 0 to 10 out of 10 answers covering all three fields of a three-field change.
 - **Cap:** counted per UTC day in Postgres and claimed atomically before each call (`… ON CONFLICT DO UPDATE … WHERE calls < cap`), so it holds across restarts and instances. Failed calls count too.
 - **When there's no AI summary**, the old → new values are always shown, plus the reason:
 

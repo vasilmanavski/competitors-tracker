@@ -131,6 +131,7 @@ describe("summarising", () => {
     assert.equal(
       prompts[0]?.at(-1)?.content,
       [
+        "Changed fields (1): tagline.",
         'Old tagline: "Simple CRM for small teams"',
         'New tagline: "The CRM small teams love"',
         "Competitor: Acme CRM (acme-crm).",
