@@ -67,7 +67,11 @@ export const competitors = pgTable(
   ],
 );
 
-/** One row per poll. Deleting a competitor deletes its history. */
+/**
+ * One row per poll, except that a run of uneventful polls of the same kind shares one row:
+ * `fetched_at` is its first check, `last_checked_at` its last, `check_count` how many there were.
+ * Deleting a competitor deletes its history.
+ */
 export const snapshots = pgTable(
   "snapshots",
   {
@@ -76,6 +80,8 @@ export const snapshots = pgTable(
       .notNull()
       .references(() => competitors.id, { onDelete: "cascade" }),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }).notNull(),
+    checkCount: integer("check_count").notNull().default(1),
     status: text("status", { enum: SNAPSHOT_STATUSES }).notNull(),
     title: text("title"),
     tagline: text("tagline"),
@@ -101,8 +107,8 @@ export const snapshots = pgTable(
     index("snapshots_last_ok_idx")
       .on(t.competitorId, t.fetchedAt.desc())
       .where(sql`${t.status} = 'ok'`),
-    index("snapshots_uneventful_fetched_idx")
-      .on(t.fetchedAt)
+    index("snapshots_uneventful_last_checked_idx")
+      .on(t.lastCheckedAt)
       .where(sql`not ${t.changed} and ${t.summaryStatus} <> 'first_snapshot'`),
     index("snapshots_summary_due_idx")
       .on(t.summaryNextAttemptAt)

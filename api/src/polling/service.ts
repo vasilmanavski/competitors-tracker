@@ -42,7 +42,10 @@ export function createPollingService(deps: PollingServiceDeps) {
       return competitorRepository.claimDue(limit, intervalSeconds, excludeIds);
     },
 
-    /** Fetches, normalises and stores one competitor's listing. Every poll yields one snapshot. */
+    /**
+     * Fetches, normalises and records one competitor's listing: a new snapshot, or one more
+     * check on the newest snapshot when it continues a quiet run.
+     */
     async pollCompetitor(competitorId: string, signal?: AbortSignal): Promise<void> {
       const result = await source.fetchListing(competitorId, signal);
       const outcome = toOutcome(result);
@@ -55,7 +58,7 @@ export function createPollingService(deps: PollingServiceDeps) {
       const { snapshot, decision } = recorded;
       const fields = { competitorId, status: snapshot.status, changed: decision.changed, changedFields: decision.changedFields };
       if (outcome.status === "fetch_failed") log.warn({ ...fields, error: outcome.error }, "poll failed");
-      else log.info(fields, "poll stored");
+      else log.info(fields, "poll recorded");
     },
   };
 }

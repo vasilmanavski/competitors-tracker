@@ -120,13 +120,51 @@ describe("polling → snapshots → timeline", () => {
     assert.equal(row.neverFound, false);
   });
 
+  test("unchanged polls extend one quiet run; a failure or a change ends it", async () => {
+    await add("acme-crm");
+    scripts.set("acme-crm", [
+      body(), // first
+      body(), body(), body(), // one run of 3
+      { kind: "failed", error: "HTTP 503 (3 attempts)", attempts: 3 },
+      body(), body(), // a new run of 2
+      body({ price: "$29/mo" }), // change
+      body({ price: "$29/mo" }), // a new run of 1
+    ]);
+    for (let i = 0; i < 9; i++) await poll("acme-crm");
+
+    const { rows } = await timeline("acme-crm");
+    const runs = rows.map((s: { summaryStatus: string; checkCount: number }) => [s.summaryStatus, s.checkCount]);
+    assert.deepEqual(runs.reverse(), [
+      ["first_snapshot", 1],
+      ["not_changed", 3],
+      ["fetch_failed", 1],
+      ["not_changed", 2],
+      ["summarized", 1],
+      ["not_changed", 1],
+    ]);
+    const runOfThree = rows[4];
+    assert.ok(runOfThree.lastCheckedAt >= runOfThree.fetchedAt);
+    assert.equal((await listRow("acme-crm")).lastPolledAt, rows[0].lastCheckedAt);
+  });
+
+  test("a quiet run keeps the latest wording the source used", async () => {
+    await add("acme-crm");
+    scripts.set("acme-crm", [body(), body({ price: "USD 39.00 per month" }), body({ price: "$39.00/mo" })]);
+    for (let i = 0; i < 3; i++) await poll("acme-crm");
+
+    const [run] = (await timeline("acme-crm")).rows;
+    assert.equal(run.checkCount, 2);
+    assert.equal(run.priceRaw, "$39.00/mo");
+    assert.equal(run.price, "$39/mo");
+  });
+
   test("an id the source never knew: not_found, flagged neverFound, never 'changed'", async () => {
     await add("qweqweqweqeqe");
     scripts.set("qweqweqweqeqe", [{ kind: "not_found" }, { kind: "not_found" }]);
     await poll("qweqweqweqeqe");
     await poll("qweqweqweqeqe");
     const { rows } = await timeline("qweqweqweqeqe");
-    assert.deepEqual(rows.map((s: { changed: boolean }) => s.changed), [false, false]);
+    assert.deepEqual(rows.map((s: { changed: boolean; checkCount: number }) => [s.changed, s.checkCount]), [[false, 2]]);
     const row = await listRow("qweqweqweqeqe");
     assert.equal(row.neverFound, true);
     assert.equal(row.changedLast24h, false);
@@ -170,12 +208,37 @@ describe("GET /api/competitors/:id/snapshots", () => {
 
   test("limit + before page through the history", async () => {
     await add("acme-crm");
-    scripts.set("acme-crm", Array.from({ length: 5 }, () => body()));
+    scripts.set("acme-crm", Array.from({ length: 5 }, (_, i) => body({ price: `$${30 + i}/mo` })));
     for (let i = 0; i < 5; i++) await poll("acme-crm");
     const page1 = (await timeline("acme-crm", "?limit=2")).rows;
     const page2 = (await timeline("acme-crm", `?limit=2&before=${encodeURIComponent(page1[1].fetchedAt)}`)).rows;
     const all = (await timeline("acme-crm")).rows;
     assert.deepEqual([...page1, ...page2].map((s: { id: number }) => s.id), all.slice(0, 4).map((s: { id: number }) => s.id));
+  });
+
+  test("paging across quiet runs returns every row once and every check", async () => {
+    await add("acme-crm");
+    scripts.set("acme-crm", [
+      body(), body(), body(), body(), // first + a run of 3
+      body({ price: "$29/mo" }), body({ price: "$29/mo" }), body({ price: "$29/mo" }), // change + a run of 2
+      body({ price: "$19/mo" }), body({ price: "$19/mo" }), // change + a run of 1
+    ]);
+    for (let i = 0; i < 9; i++) await poll("acme-crm");
+
+    const pages: { id: number; fetchedAt: string; checkCount: number }[][] = [];
+    let before = "";
+    for (;;) {
+      const qs = before ? `?limit=2&before=${encodeURIComponent(before)}` : "?limit=2";
+      const page = (await timeline("acme-crm", qs)).rows;
+      if (page.length === 0) break;
+      pages.push(page);
+      before = page.at(-1).fetchedAt;
+    }
+    const paged = pages.flat();
+    const all = (await timeline("acme-crm")).rows;
+    assert.equal(pages.length, 3);
+    assert.deepEqual(paged.map((s) => s.id), all.map((s: { id: number }) => s.id));
+    assert.equal(paged.reduce((total, s) => total + s.checkCount, 0), 9);
   });
 });
 

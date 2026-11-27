@@ -65,12 +65,29 @@ describe("retention", () => {
     await record("acme-crm", 197, incomplete); // purged
     await record("acme-crm", 196, listing({ price: "$29/mo" })); // change: kept
     await record("acme-crm", 195, listing({ price: "$29/mo" })); // no change: purged
+    await record("acme-crm", 50, failed); // recent: kept, and it ends the quiet run before it
     await record("acme-crm", 10, listing({ price: "$29/mo" })); // recent: kept, and the baseline
 
     const deleted = await retention().purgeExpiredSnapshots();
 
     assert.equal(deleted, 4);
-    assert.deepEqual(await remainingStatuses("acme-crm"), ["200d first_snapshot", "196d summarized", "10d not_changed"]);
+    assert.deepEqual(await remainingStatuses("acme-crm"), [
+      "200d first_snapshot",
+      "196d summarized",
+      "50d fetch_failed",
+      "10d not_changed",
+    ]);
+  });
+
+  test("a quiet run is kept until its last check has expired", async () => {
+    await services.competitorService.startTracking("acme-crm");
+    await record("acme-crm", 120, listing());
+    await record("acme-crm", 119, listing());
+    const run = await record("acme-crm", 10, listing());
+    assert.equal(run.checkCount, 2);
+
+    assert.equal(await retention().purgeExpiredSnapshots(), 0);
+    assert.deepEqual(await remainingStatuses("acme-crm"), ["120d first_snapshot", "119d not_changed"]);
   });
 
   test("a competitor delisted for longer than the retention keeps its last listing as the baseline", async () => {
@@ -78,20 +95,42 @@ describe("retention", () => {
     await record("gone", 150, listing()); // first snapshot
     await record("gone", 149, listing()); // no change, but the latest complete listing: the baseline
     await record("gone", 148, notFound); // delisted: a change
-    for (let day = 147; day >= 100; day--) await record("gone", day, notFound); // still not listed: purged
+    for (let day = 147; day >= 100; day--) await record("gone", day, notFound); // still not listed: the newest row, kept
 
     await retention().purgeExpiredSnapshots();
-    assert.deepEqual(await remainingStatuses("gone"), ["150d first_snapshot", "149d not_changed", "148d summarized"]);
+    assert.deepEqual(await remainingStatuses("gone"), [
+      "150d first_snapshot",
+      "149d not_changed",
+      "148d summarized",
+      "147d not_found",
+    ]);
 
     const back = await record("gone", 0, listing({ price: "$29/mo" }));
     assert.equal(back.summaryStatus, "summarized");
     assert.equal(back.summary, "Back on the source after being unavailable. Price dropped from $39/mo to $29/mo (-26%).");
   });
 
+  test("after a long outage the newest row is kept, so the next quiet poll can't extend across a failure", async () => {
+    await services.competitorService.startTracking("acme-crm");
+    await record("acme-crm", 200, listing());
+    await record("acme-crm", 199, listing()); // the baseline
+    await record("acme-crm", 150, failed); // the newest row: kept although expired
+
+    assert.equal(await retention().purgeExpiredSnapshots(), 0);
+    const next = await record("acme-crm", 0, listing());
+    assert.equal(next.checkCount, 1);
+    assert.deepEqual(await remainingStatuses("acme-crm"), [
+      "200d first_snapshot",
+      "199d not_changed",
+      "150d fetch_failed",
+      "0d not_changed",
+    ]);
+  });
+
   test("purges in batches until nothing expired is left", async () => {
     await services.competitorService.startTracking("acme-crm");
     await record("acme-crm", 120, listing());
-    for (let day = 119; day >= 100; day--) await record("acme-crm", day, listing());
+    for (let day = 119; day >= 100; day--) await record("acme-crm", day, day % 2 === 0 ? failed : listing());
     await record("acme-crm", 1, listing());
 
     assert.equal(await retention(3).purgeExpiredSnapshots(), 20);

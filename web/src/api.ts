@@ -30,7 +30,12 @@ export type FieldChange = { field: string; before: string | null; after: string 
 
 export type Snapshot = {
   id: number;
+  /** The first check this row stands for. */
   fetchedAt: string;
+  /** The last check: later than `fetchedAt` only on a quiet run of several checks. */
+  lastCheckedAt: string;
+  /** How many polls this row stands for: 1 for every event, more for a quiet run. */
+  checkCount: number;
   status: SnapshotStatus;
   title: string | null;
   tagline: string | null;

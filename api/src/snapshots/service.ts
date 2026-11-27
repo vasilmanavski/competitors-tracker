@@ -1,5 +1,6 @@
 import { CompetitorNotTrackedError } from "../competitors/errors.ts";
 import type { DataAccess } from "../data-access.ts";
+import type { SummaryStatus } from "../db/schema.ts";
 import { type ChangeDecision, type Comparable, comparable, detectChange, type PollOutcome } from "../listings/change-detection.ts";
 import { describeChanges, type DisplayListing, type FieldChange, toDisplayListing } from "../listings/field-changes.ts";
 import { ruleSummary } from "../summaries/rule-summary.ts";
@@ -24,6 +25,14 @@ function initialSummaryFor(decision: ChangeDecision, changes: FieldChange[], fet
   return { status: "pending", text: null, source: null, dueAt: fetchedAt };
 }
 
+const QUIET_RUN_STATUSES: ReadonlySet<SummaryStatus> = new Set(["not_changed", "not_found"]);
+
+/** The newest snapshot when this poll is uneventful in the same way, so it only extends that run. */
+function quietRunToExtend(decision: ChangeDecision, newest: Snapshot | null): Snapshot | null {
+  if (!newest || !QUIET_RUN_STATUSES.has(decision.summaryStatus)) return null;
+  return newest.summaryStatus === decision.summaryStatus ? newest : null;
+}
+
 function changesFor(decision: ChangeDecision, lastOk: Snapshot | null, outcome: PollOutcome): FieldChange[] {
   if (!decision.changed) return [];
   const before = lastOk && toDisplayListing({ ...lastOk, price: priceOf(lastOk) });
@@ -46,7 +55,8 @@ export function createSnapshotService(data: DataAccess) {
     /**
      * Stores one poll result and decides whether it is a change that matters. A change is
      * stored with its old → new values; structured changes get a rule-written summary at once,
-     * wording changes are queued for the LLM. The LLM never runs here.
+     * wording changes are queued for the LLM. The LLM never runs here. An unchanged or
+     * still-not-listed poll that follows one of the same kind only extends that quiet run.
      * Runs in one transaction with the competitor row locked, so concurrent polls of
      * the same competitor can't compare against the same baseline.
      * @returns null when the competitor was removed while it was being fetched
@@ -60,14 +70,17 @@ export function createSnapshotService(data: DataAccess) {
         const decision = detectChange(outcome, lastOk && toComparable(lastOk), competitor.listingState);
 
         const changes = changesFor(decision, lastOk, outcome);
-        const snapshot = await snapshotRepository.insert({
-          competitorId,
-          fetchedAt,
-          outcome,
-          decision,
-          changes,
-          initialSummary: initialSummaryFor(decision, changes, fetchedAt),
-        });
+        const run = quietRunToExtend(decision, await snapshotRepository.findNewest(competitorId));
+        const snapshot = run
+          ? await snapshotRepository.extendQuietRun(run.id, fetchedAt, outcome)
+          : await snapshotRepository.insert({
+              competitorId,
+              fetchedAt,
+              outcome,
+              decision,
+              changes,
+              initialSummary: initialSummaryFor(decision, changes, fetchedAt),
+            });
         await competitorRepository.updatePollResult(competitorId, {
           polledAt: fetchedAt,
           status: outcome.status,

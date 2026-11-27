@@ -1,6 +1,6 @@
 import type { Snapshot } from "../api.ts";
 import { absoluteTime, timeRange } from "../format.ts";
-import type { QuietRunKind } from "./group-snapshots.ts";
+import { type QuietRunKind, quietRunSpan } from "./group-snapshots.ts";
 
 const RUN_LABELS: Record<QuietRunKind, string> = {
   unchanged: "No change",
@@ -16,14 +16,13 @@ function pluralChecks(count: number): string {
  * watched (how many checks, from when to when) without competing with the change cards.
  */
 export function QuietRun({ runKind, snapshots }: { runKind: QuietRunKind; snapshots: Snapshot[] }) {
-  const newest = snapshots[0];
-  const oldest = snapshots.at(-1);
-  if (!newest || !oldest) return null;
+  const span = quietRunSpan(snapshots);
+  if (!span) return null;
 
   return (
-    <li className="quiet-run" title={`${absoluteTime(oldest.fetchedAt)} – ${absoluteTime(newest.fetchedAt)}`}>
+    <li className="quiet-run" title={`${absoluteTime(span.from)} – ${absoluteTime(span.to)}`}>
       <span className="quiet-run-text">
-        {RUN_LABELS[runKind]} · {pluralChecks(snapshots.length)} · {timeRange(oldest.fetchedAt, newest.fetchedAt)}
+        {RUN_LABELS[runKind]} · {pluralChecks(span.checks)} · {timeRange(span.from, span.to)}
       </span>
     </li>
   );
