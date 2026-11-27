@@ -10,6 +10,8 @@ export function toSnapshotDto(snapshot: Snapshot) {
   return {
     id: snapshot.id,
     fetchedAt: snapshot.fetchedAt.toISOString(),
+    lastCheckedAt: snapshot.lastCheckedAt.toISOString(),
+    checkCount: snapshot.checkCount,
     status: snapshot.status,
     title: snapshot.title,
     tagline: snapshot.tagline,

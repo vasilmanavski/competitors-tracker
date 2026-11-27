@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Snapshot, SummaryStatus } from "../api.ts";
-import { groupSnapshots, timelineItemKey } from "./group-snapshots.ts";
+import { groupSnapshots, quietRunSpan, timelineItemKey } from "./group-snapshots.ts";
 
 let nextId = 100;
 const snapshot = (summaryStatus: SummaryStatus): Snapshot => ({
   id: nextId--,
   fetchedAt: new Date(Date.UTC(2026, 10, 26, 12, nextId)).toISOString(),
+  lastCheckedAt: new Date(Date.UTC(2026, 10, 26, 12, nextId)).toISOString(),
+  checkCount: 1,
   status: summaryStatus === "not_found" ? "not_found" : "ok",
   title: "Acme CRM",
   tagline: null,
@@ -61,4 +63,16 @@ test("a run keeps its key when a newer poll joins it", () => {
   const [after] = groupSnapshots([newer, ...older]);
   assert.ok(before && after);
   assert.equal(timelineItemKey(after), timelineItemKey(before));
+});
+
+test("a run counts every check its rows stand for, from the oldest first check to the newest last check", () => {
+  const stored = { ...snapshot("not_changed"), checkCount: 5, lastCheckedAt: "2026-11-26T15:00:00.000Z" };
+  const older = { ...snapshot("not_changed"), fetchedAt: "2026-11-26T09:00:00.000Z" };
+  const [run] = groupSnapshots([stored, older]);
+  assert.ok(run?.kind === "quiet_run");
+  assert.deepEqual(quietRunSpan(run.snapshots), {
+    checks: 6,
+    from: "2026-11-26T09:00:00.000Z",
+    to: "2026-11-26T15:00:00.000Z",
+  });
 });

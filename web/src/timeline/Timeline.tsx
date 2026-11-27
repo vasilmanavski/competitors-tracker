@@ -34,7 +34,7 @@ export function Timeline({ id }: { id: string }) {
       )}
       {timeline.state === "ready" && timeline.snapshots.length > 0 && (
         <>
-          <p className="last-checked muted">Last checked {relativeTime(timeline.snapshots[0]?.fetchedAt ?? "")}</p>
+          <p className="last-checked muted">Last checked {relativeTime(timeline.snapshots[0]?.lastCheckedAt ?? "")}</p>
           <ol className="timeline">
             {groupSnapshots(timeline.snapshots).map((item) =>
               item.kind === "event" ? (

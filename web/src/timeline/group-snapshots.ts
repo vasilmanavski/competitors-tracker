@@ -39,6 +39,15 @@ export function groupSnapshots(snapshots: Snapshot[]): TimelineItem[] {
   return items;
 }
 
+/** What a quiet run line shows: the total number of checks and when the first and last ran. */
+export function quietRunSpan(snapshots: Snapshot[]): { checks: number; from: string; to: string } | null {
+  const newest = snapshots[0];
+  const oldest = snapshots.at(-1);
+  if (!newest || !oldest) return null;
+  const checks = snapshots.reduce((total, snapshot) => total + snapshot.checkCount, 0);
+  return { checks, from: oldest.fetchedAt, to: newest.lastCheckedAt };
+}
+
 /** A key that survives new polls joining the run at its newest end. */
 export function timelineItemKey(item: TimelineItem): string {
   if (item.kind === "event") return `event-${item.snapshot.id}`;

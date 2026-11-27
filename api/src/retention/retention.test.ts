@@ -65,12 +65,29 @@ describe("retention", () => {
     await record("acme-crm", 197, incomplete); // purged
     await record("acme-crm", 196, listing({ price: "$29/mo" })); // change: kept
     await record("acme-crm", 195, listing({ price: "$29/mo" })); // no change: purged
+    await record("acme-crm", 50, failed); // recent: kept, and it ends the quiet run before it
     await record("acme-crm", 10, listing({ price: "$29/mo" })); // recent: kept, and the baseline
 
     const deleted = await retention().purgeExpiredSnapshots();
 
     assert.equal(deleted, 4);
-    assert.deepEqual(await remainingStatuses("acme-crm"), ["200d first_snapshot", "196d summarized", "10d not_changed"]);
+    assert.deepEqual(await remainingStatuses("acme-crm"), [
+      "200d first_snapshot",
+      "196d summarized",
+      "50d fetch_failed",
+      "10d not_changed",
+    ]);
+  });
+
+  test("a quiet run is kept until its last check has expired", async () => {
+    await services.competitorService.startTracking("acme-crm");
+    await record("acme-crm", 120, listing());
+    await record("acme-crm", 119, listing());
+    const run = await record("acme-crm", 10, listing());
+    assert.equal(run.checkCount, 2);
+
+    assert.equal(await retention().purgeExpiredSnapshots(), 0);
+    assert.deepEqual(await remainingStatuses("acme-crm"), ["120d first_snapshot", "119d not_changed"]);
   });
 
   test("a competitor delisted for longer than the retention keeps its last listing as the baseline", async () => {
@@ -91,7 +108,7 @@ describe("retention", () => {
   test("purges in batches until nothing expired is left", async () => {
     await services.competitorService.startTracking("acme-crm");
     await record("acme-crm", 120, listing());
-    for (let day = 119; day >= 100; day--) await record("acme-crm", day, listing());
+    for (let day = 119; day >= 100; day--) await record("acme-crm", day, day % 2 === 0 ? failed : listing());
     await record("acme-crm", 1, listing());
 
     assert.equal(await retention(3).purgeExpiredSnapshots(), 20);

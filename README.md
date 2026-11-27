@@ -4,7 +4,7 @@ Tracks competitor listings over time, decides when a listing changed in a way a 
 
 **In short**
 - `docker compose up --build`, then open http://localhost:8080.
-- Every poll is stored, including unchanged and failed ones. A change is decided on 4 normalised fields, so format noise never counts.
+- Every poll is recorded, including unchanged and failed ones. A run of unchanged polls is one row with a check count, not one row per poll. A change is decided on 4 normalised fields, so format noise never counts.
 - Price, title and availability changes are summarised by my own code. The LLM is only used for wording changes, where interpretation actually helps.
 - The source rate limit and the 2,000/day LLM cap are both enforced in a way that holds across restarts. When the numbers don't fit, the system slows down instead of breaking.
 - [The production numbers don't fit](#the-production-numbers-dont-fit-what-id-do) is where most of my thinking went.
@@ -130,8 +130,9 @@ The full reasoning for each part is in [`docs/epics/`](docs/epics).
 - **The database is the queue.** Every second, the scheduler claims due competitors with `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)` and moves their `next_poll_at` forward *before* fetching. A slow poll is never picked twice, several instances can share the work, and when polling falls behind, the interval stretches instead of a backlog building up. A Redis/BullMQ queue would be one more moving part for no gain at this size.
 
 ### How history is stored
-- **Every poll is a row** in `snapshots`, including unchanged, incomplete, 404 and failed polls, because the brief wants all of them visible for 90 days. Change detection and the insert run in one transaction with the competitor row locked. The list view reads summary columns on `competitors`, so it never scans snapshots.
-- **Retention keeps the changes and expires the noise.** An hourly job deletes uneventful snapshots older than 90 days, in batches of 5,000. Changes and each competitor's first snapshot are kept for good. They're a tiny share of the rows, and they're the history people come back for ("when did they drop their price?"). Each competitor's **latest complete listing is never deleted**, however old, because the next poll is compared with it. Without that, a competitor delisted for 100 days would come back as a "first snapshot" instead of "back on the source, price dropped".
+- **Every poll is recorded** in `snapshots`, including unchanged, incomplete, 404 and failed polls, because the brief wants all of them visible for 90 days. Change detection and the write run in one transaction with the competitor row locked. The list view reads summary columns on `competitors`, so it never scans snapshots.
+- **A quiet run is one row.** An unchanged poll after an unchanged poll, or a 404 after a 404, doesn't insert a row. It extends the newest one: `last_checked_at` moves forward and `check_count` goes up. 30 unchanged polls are one row with `check_count = 30`, which is exactly what the timeline shows (`No change · 30 checks · 10:13 – 10:21`). Changes, firsts, failures and incomplete listings are still one row each, and each one ends the run before it. What's given up is the time of each individual check inside a run; the count and the first and last check stay. Considered instead: a row per poll without the listing copy, which saves bytes but still means ~52M rows.
+- **Retention keeps the changes and expires the noise.** An hourly job deletes uneventful snapshots whose last check is older than 90 days, in batches of 5,000. A run that started before the cutoff but is still being checked stays whole. Changes and each competitor's first snapshot are kept for good. They're a tiny share of the rows, and they're the history people come back for ("when did they drop their price?"). Each competitor's **latest complete listing is never deleted**, however old, because the next poll is compared with it. Without that, a competitor delisted for 100 days would come back as a "first snapshot" instead of "back on the source, price dropped".
 
 ### The LLM and the cap
 - **A poll never waits for the LLM.** The snapshot is saved first. A separate summary worker makes the call (same `SKIP LOCKED` pattern, newest change first, 120 s lease). A slow or failing LLM can't lose or delay a poll.
@@ -184,11 +185,11 @@ Change detection does most of the work. The code summaries only remove the struc
 - **Prioritise** by competitor importance or size of change, and say so in the UI.
 - **Batch several competitors per call, only under cap pressure.** The cap counts calls, so 10 changes in one call would stretch it about tenfold. But a per-call cap is unusual: providers bill by tokens, so Finance probably means "keep the cost down". I'd check with them before relying on this. It also needs structured output with per-item validation, one timeout delays the whole batch, and the model can mix up details between competitors. It can't be shown with the mock either, since the mock only echoes the prompt.
 
-### 3. History: ~52 million rows
-6,000 × 96 polls a day × 90 days = **51.8M rows**, mostly unchanged polls carrying a full copy of the listing.
+### 3. History: 52 million polls, far fewer rows
+6,000 × 96 polls a day × 90 days = **51.8M polls**. Stored one row per poll, most of those rows would be unchanged polls carrying a full copy of a listing we already have.
+- **Built:** quiet runs (above). A competitor that doesn't change is one row per stretch between events, not 96 rows a day. Rows now grow with **changes, failures and incomplete listings**, not with polls. One flaky or reworded competitor still adds rows, but a quiet one barely does.
 - **Built:** retention (above), using a partial index on exactly the rows it deletes.
-- **Next:** partition `snapshots` by month, so an expired month goes with one instant `DROP` instead of batched deletes. Changes would be copied to a small table first so nothing is lost.
-- **Next:** store the listing text only when it changes. Unchanged polls would keep just the status and time.
+- **Next:** partition `snapshots` by month, so an expired month goes with one instant `DROP` instead of batched deletes. Changes would be copied to a small table first so nothing is lost. With quiet runs this matters much less, since there's far less to expire.
 - Reads are already bounded: the timeline is paginated and the list reads one row per competitor.
 
 ### 4. More than one instance

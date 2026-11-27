@@ -43,6 +43,13 @@
       "when": 1795698673026,
       "tag": "0005_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795771709360,
+      "tag": "0006_quiet_runs",
+      "breakpoints": true
     }
   ]
 }

@@ -70,6 +70,7 @@ function toRow({ competitorId, fetchedAt, outcome, decision, changes, initialSum
   return {
     competitorId,
     fetchedAt,
+    lastCheckedAt: fetchedAt,
     status: outcome.status,
     ...listingColumns(outcome),
     changed: decision.changed,
@@ -98,9 +99,30 @@ export function createSnapshotRepository(db: DbExecutor) {
       return row ?? null;
     },
 
+    async findNewest(competitorId: string): Promise<Snapshot | null> {
+      const [row] = await db
+        .select()
+        .from(snapshots)
+        .where(eq(snapshots.competitorId, competitorId))
+        .orderBy(...newestFirst)
+        .limit(1);
+      return row ?? null;
+    },
+
     async insert(snapshot: NewSnapshot): Promise<Snapshot> {
       const [row] = await db.insert(snapshots).values(toRow(snapshot)).returning();
       if (!row) throw new Error("insert into snapshots returned no row");
+      return row;
+    },
+
+    /** Counts one more check on a quiet run instead of storing a new row. */
+    async extendQuietRun(id: number, checkedAt: Date): Promise<Snapshot> {
+      const [row] = await db
+        .update(snapshots)
+        .set({ lastCheckedAt: checkedAt, checkCount: sql`${snapshots.checkCount} + 1` })
+        .where(eq(snapshots.id, id))
+        .returning();
+      if (!row) throw new Error(`quiet run ${id} to extend was not found`);
       return row;
     },
 
@@ -136,7 +158,8 @@ export function createSnapshotRepository(db: DbExecutor) {
 
     /**
      * Deletes up to `limit` uneventful snapshots (no change: unchanged, incomplete, failed or
-     * still-not-listed polls) fetched before `cutoff`. Changes and first snapshots are history
+     * still-not-listed polls) last checked before `cutoff`, so a quiet run goes only once all
+     * of it has expired. Changes and first snapshots are history
      * worth keeping, and each competitor's latest complete listing is kept because it is the
      * baseline the next poll is compared with, however old it is.
      * @returns how many rows were deleted
@@ -146,7 +169,7 @@ export function createSnapshotRepository(db: DbExecutor) {
         delete from ${snapshots}
         where id in (
           select s.id from ${snapshots} s
-          where s.fetched_at < ${cutoff}
+          where s.last_checked_at < ${cutoff}
             and not s.changed
             and s.summary_status <> 'first_snapshot'
             and s.id <> coalesce((
