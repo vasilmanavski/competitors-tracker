@@ -14,7 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { FieldChange } from "../listings/field-changes.ts";
 
-/** What one poll produced. Every poll is stored, whatever happened. */
+/** What one poll produced. Every poll is recorded, whatever happened. */
 export const SNAPSHOT_STATUSES = ["ok", "partial", "not_found", "fetch_failed"] as const;
 export type SnapshotStatus = (typeof SNAPSHOT_STATUSES)[number];
 

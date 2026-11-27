@@ -4,12 +4,12 @@ Tracks competitor listings over time, decides when a listing changed in a way a 
 
 **In short**
 - `docker compose up --build`, then open http://localhost:8080.
-- Every poll is recorded, including unchanged and failed ones. A run of unchanged polls is one row with a check count, not one row per poll. A change is decided on 4 normalised fields, so format noise never counts.
+- Every poll is recorded, including unchanged and failed ones. A run of unchanged polls (or of repeated 404s) is one row with a check count, not one row per poll. A change is decided on 4 normalised fields, so format noise never counts.
 - Price, title and availability changes are summarised by my own code. The LLM is only used for wording changes, where interpretation actually helps.
 - The source rate limit and the 2,000/day LLM cap are both enforced in a way that holds across restarts. When the numbers don't fit, the system slows down instead of breaking.
 - [The production numbers don't fit](#the-production-numbers-dont-fit-what-id-do) is where most of my thinking went.
 
-**Stack:** Node.js 24 + TypeScript (strict), Fastify, Zod, PostgreSQL with Drizzle migrations. React + Vite on the frontend, served by nginx in Docker. Polling and LLM summaries run as background workers inside the API process.
+**Stack:** Node.js 24 + TypeScript (strict), Fastify, Zod, PostgreSQL with Drizzle migrations. React + Vite on the frontend, served by nginx in Docker. Polling, LLM summaries and retention run as background workers inside the API process.
 
 ```
 browser ─► web (nginx :8080) ─/api─► api (:3000) ─► postgres
@@ -55,7 +55,7 @@ Every setting is an env var, validated at startup. For Docker, put overrides in 
 | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | mock | Any OpenAI Chat Completions endpoint |
 | `LLM_DAILY_CAP` | `2000` | Hard cap on LLM calls per UTC day |
 | `LLM_TIMEOUT_MS` | `10000` | Per LLM call |
-| `SNAPSHOT_RETENTION_DAYS` | `90` | Unchanged polls older than this are deleted; changes are kept |
+| `SNAPSHOT_RETENTION_DAYS` | `90` | Uneventful snapshots (unchanged, failed, incomplete, still not listed) whose last check is older than this are deleted; changes are kept |
 | `SCHEDULER_ENABLED` | `true` | `false` runs the API without background work |
 
 A new poll interval applies from each competitor's next poll. To apply it straight away: `update competitors set next_poll_at = now()`.
@@ -192,8 +192,10 @@ Change detection does most of the work. The code summaries only remove the struc
 - **Next:** partition `snapshots` by month, so an expired month goes with one instant `DROP` instead of batched deletes. Changes would be copied to a small table first so nothing is lost. With quiet runs this matters much less, since there's far less to expire.
 - Reads are already bounded: the timeline is paginated and the list reads one row per competitor.
 
-### 4. More than one instance
-Claiming and the LLM cap are already safe across instances. The **rate limiter isn't**: it lives in each process, so two API replicas would send 8 req/s. Fix: run polling in a single worker (`SCHEDULER_ENABLED=false` on the API replicas), or share the token bucket in Postgres or Redis.
+### 4. More instances don't help throughput
+**One instance is the right size.** Every limit that matters is outside the process: the source allows 5 req/s in total and one process already uses 4, the LLM budget is 2,000 calls a day, and the UI has one internal user. A second poller wouldn't poll more competitors. It would only split the same 4 req/s, or exceed the limit, because the rate limiter lives in each process (two pollers would send 8 req/s).
+
+A second instance is only worth it for **availability**, so a crash or a redeploy doesn't take the UI down. Claiming and the LLM cap are already safe across instances, so that works as long as polling runs in one of them (`SCHEDULER_ENABLED=false` on the other). Sharing the token bucket in Postgres or Redis would only matter if polling itself had to move between instances.
 
 ---
 
@@ -230,9 +232,8 @@ I skipped the cloud bonus on purpose: the whole system starts with one command, 
 
 ### Production: split it by job
 - **Managed Postgres** (RDS, Cloud SQL, Neon) instead of the container: backups, point-in-time restore and failover come with it.
-- **The API and the background worker as separate services**, from the same image:
-  - API replicas with `SCHEDULER_ENABLED=false`, scaled on traffic behind a load balancer that checks `/health`.
-  - **One worker** with the scheduler on (polling, summaries, retention). Claiming and the LLM cap are already safe across instances, but the source rate limiter lives in one process (see section 4 above), so polling stays in a single worker until the limiter is shared.
+- **One instance is enough.** The bottleneck is the source's rate limit, not our process (see section 4 above), so more replicas wouldn't poll faster. A platform that restarts the container when `/health` fails covers most of the availability need.
+- **If downtime during a crash or redeploy matters:** split it into an API service with `SCHEDULER_ENABLED=false` (two copies behind a load balancer that checks `/health`) and **one worker** with the scheduler on (polling, summaries, retention). Polling stays in that single worker, because the rate limiter lives in one process.
 - **The web bundle as static files on a CDN** (S3 + CloudFront or similar), with `/api` routed to the API.
 - **Secrets from the platform** (the LLM key, the database URL) instead of the compose file. `SOURCE_BASE_URL` and `LLM_BASE_URL` point at the real source and LLM.
 - **Logs and alerts:** the JSON logs go to the platform's log service, with alerts on "summaries paused" (the LLM circuit breaker), repeated `fetch_failed` polls, and the daily cap running out early.
@@ -242,12 +243,12 @@ I skipped the cloud bonus on purpose: the whole system starts with one command, 
 
 ## Left out on purpose
 - **Auth:** the brief assumes one internal user.
-- **The scaling steps above** (quiet-competitor intervals, partitioning, shared limiter, one summary per competitor, expiring stale summaries, batching): described, not built. Retention is built.
+- **The scaling steps above** (quiet-competitor intervals, partitioning, shared limiter, one summary per competitor, expiring stale summaries, batching): described, not built. Retention, quiet runs and the LLM circuit breaker are built.
 - **Competitor trend summaries:** designed and tried on Ollama, not built.
 - **Cloud deployment** (bonus): skipped to keep the time reasonable. How I'd do it is described above.
 - **Fine-tuning:** no budget, not possible on the mock, and the problem is prompting, not model knowledge.
 - **Notifications** (email/Slack) and **soft delete**.
-- **Browser e2e tests:** I tested the UI by hand in Chrome. Automated tests cover the API, the domain logic and the UI's grouping logic (157 API + 4 web tests).
+- **Browser e2e tests:** I tested the UI by hand in Chrome. Automated tests cover the API, the domain logic and the UI's grouping logic (174 API + 5 web tests).
 
 ## How I worked, and AI tools
 I built this with **Claude Code** as a pair programmer, spec first. The AI implemented; I made the decisions. Full write-up: [`docs/workflow.md`](docs/workflow.md).
@@ -255,10 +256,11 @@ I built this with **Claude Code** as a pair programmer, spec first. The AI imple
 1. **Brief first.** I pulled out what the brief requires, leaves open and scores, before any code.
 2. **Epics in a deliberate order:** setup and Docker first (so everything after runs in the real setup), then competitors, polling, AI summaries, and finally the README.
 3. **A spec per epic** ([`docs/epics/`](docs/epics)): goal, scope and out of scope, decisions marked DECIDED / PROPOSED / OPEN, failure modes, stories, and how to verify it.
-4. **One AI session per epic,** working from the spec on its own branch, merged through a PR I reviewed (#1–#4).
-5. **Refactors as separate PRs** after review (#5, #7, #8), and specs updated to match what was actually built.
+4. **One AI session per epic,** working from the spec on its own branch, merged through a PR I reviewed (#1–#4, and #10 for quiet-run storage).
+5. **Refactors and improvements as separate PRs** after review (#5, #7–#9, #11–#13), and specs updated to match what was actually built.
 
 Where I changed what the AI proposed:
+- **A row for every unchanged poll.** It stored every poll as a full row, so 96 unchanged polls a day per competitor were 96 copies of the same listing, while the timeline showed them as one line. I pushed back on the waste; now a run of unchanged polls is one row with a check count, so history grows with changes, not with time.
 - **LLM for every change.** It sent every change to the LLM, including a plain price change. I asked why a price change needs an LLM at all. Now code writes summaries for price, title and availability, and the cap is spent only on wording.
 - **Layering.** The first version put business logic in the persistence layer: change detection ran inside the snapshot repository, and routes held rules like "duplicate → 409". I had it split into routes → services → repositories. The service owns the transaction and calls a pure change-detection function, and domain errors map to HTTP in one place.
 - **Readability.** I had the source client's retry loop split into a pure response classifier plus an explicit retry policy, comments cut back, and methods renamed so each layer has its own vocabulary (`competitorService.startTracking` vs `competitorRepository.insert`).

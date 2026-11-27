@@ -2,7 +2,7 @@
 
 > Status legend: **DECIDED** = confirmed by me · **PROPOSED** = recommended, not yet confirmed · **OPEN** = still to decide
 >
-> **Status: README written (2026-11-26, branch `epic-4-readme`). Remaining: the final Docker check below, run by me on the personal laptop.**
+> **Status: done** — README written 2026-11-26 (branch `epic-4-readme`); the final Docker check below passed on the personal laptop. Later README changes are noted where they apply.
 
 ## Goal
 **In one line:** document how to run the system, why it's built this way, and how it would handle the real production numbers.
@@ -26,7 +26,7 @@ A README that meets every deliverable in the brief and answers "these numbers do
 - [x] Prompt design and what testing on a real model changed (Epic 3, 3.4): labelled old/new lines, competitive-intelligence system prompt + examples, listing as context.
 - [x] **Changing `POLL_INTERVAL_SECONDS`** takes effect from each competitor's next poll; to apply it at once, `update competitors set next_poll_at = now()` (Epic 2, 2.15).
 - [x] "Where I changed what the AI proposed": the README has a short version (layering, LLM for every change, readability, the prompt). `docs/pushbacks.md` stays uncommitted: it's interview prep, not a deliverable.
-- [x] Every poll is stored; the timeline groups unchanged polls for readability (Epic 2, story 14).
+- [x] Every poll is stored; the timeline groups unchanged polls for readability (Epic 2, story 14). _Since Epic 5 a quiet run is also one row in storage._
 
 ## Production context (from the brief)
 - 6,000 tracked competitors, each polled every 15 min
@@ -39,15 +39,15 @@ A README that meets every deliverable in the brief and answers "these numbers do
 |---|---|---|---|
 | Polling rate | 6,000 × 4/h = 24,000/h ≈ **6.67 req/s** | > 5 req/s before any retries | Today: the interval stretches gracefully (25 min at our 4 req/s), the limit is never exceeded. Next: tiered intervals by volatility (e.g. 1,000 active at 15 min + 5,000 quiet at 60 min ≈ 2.5 req/s), ask for a higher limit or a batch endpoint, new competitors first (4.4). |
 | LLM cap | 2,000/day ÷ 6,000 competitors ≈ 0.33 summaries per competitor per day | Changes can exceed the cap | **Built:** the LLM runs only on meaningful changes, and price / title / availability changes are summarised by rules with no call (Epic 3, 3.6). Over the cap: `daily_cap_reached`, retried after midnight UTC, newest first; the old → new values are always shown. To describe (in this order): coalesce per competitor (one summary of the day's net wording change), prioritise the budget, and **batch only under cap pressure** (5–10 changes per call with a JSON `[{id, summary}]` answer, per-item validation and single-call fallback). Batching isn't the default: it needs structured output, one failure hits the whole batch, competitors can bleed into each other's summaries, and the mock can't return per-item answers. |
-| Storage | 6,000 × 96 polls/day × 90 days ≈ **52M rows** | A large single table | **Built:** retention (4.5). Next: monthly partitions on `fetched_at` (changes copied out first), store listing content only on change. |
-| Multiple instances | — | The rate limiter is per process | Claims and the LLM cap are already instance-safe. Run polling in one worker (`SCHEDULER_ENABLED=false` on API replicas) or share the token bucket. |
+| Storage | 6,000 × 96 polls/day × 90 days ≈ **52M polls** | A large single table | **Built:** retention (4.5), and since Epic 5 quiet runs (one row per run of unchanged polls, so rows grow with changes, not polls). Next: monthly partitions (changes copied out first). |
+| Multiple instances | — | The rate limiter is per process | **Not needed for throughput:** the source's 5 req/s, the LLM budget and one internal user are the limits, not our process. A second instance only adds availability; claims and the LLM cap are already instance-safe, and polling stays in one of them (`SCHEDULER_ENABLED=false` on the other). _Reframed 2026-11-27._ |
 
 ## Decisions
 | # | Decision | Status |
 |---|---|---|
 | 4.1 | The README is its own epic, assembled from each epic's decision log. | **DECIDED** |
 | 4.2 | Production-scale measures are **described, not built** (partitioning, tiered polling, shared limiter, coalescing/batching LLM calls). | **DECIDED** 2026-11-26 |
-| 4.3 | Cloud deployment (bonus): **skipped**, to keep the time reasonable. Listed under "left out on purpose". | **DECIDED** 2026-11-26 |
+| 4.3 | Cloud deployment (bonus): **skipped**, to keep the time reasonable. Listed under "left out on purpose". _Added 2026-11-27 (PR #13): a README section "How I'd deploy it" describes a one-VM demo and the production split._ | **DECIDED** 2026-11-26 |
 | 4.4 | New competitors queue behind overdue ones when polling falls behind (`docs/pushbacks.md` #5). Fix proposed: give new rows priority (e.g. a `next_poll_at` default in the past). **Described in the README, not built** (wrap-up: keep the time reasonable). | **DECIDED** 2026-11-26 |
 | 4.5 | **Retention: keep the changes, expire the noise** (option 3 of three discussed). Uneventful snapshots (not `changed`, not `first_snapshot`) older than `SNAPSHOT_RETENTION_DAYS` (default 90) are purged by an hourly job (also at startup), 5,000 rows per statement. _Since Epic 5 (5.5) a quiet run expires by its last check._ Kept for good: changes, first snapshots, and each competitor's **latest complete (`ok`) listing however old**, because it's the change-detection baseline (otherwise a competitor delisted > 90 days returns as a "first snapshot"). Rejected: delete everything > 90 days (loses change history, can break detection); keep everything (unbounded). Partitioning is described, not built. | **DECIDED** 2026-11-26 |
 
@@ -69,7 +69,7 @@ Checklist:
 ## Stories
 1. **README** (`README.md`): run with Docker / without Docker, configuration table, other source URL, LLM options (mock used; OpenAI; Ollama), what the UI shows and how to check it (rule vs AI two-step `callCount` check, failure-injection table), main decisions with alternatives, the production-numbers analysis (polling, LLM cap, storage, multiple instances), left out on purpose, AI tools and where I changed what the AI proposed.
 2. **Static Docker review** (no Docker on the dev laptop): the API image runs `node src/main.ts` on `node:22-alpine` (≥ 22.18, type stripping; since moved to `node:24-alpine`, see the Docker check above) and copies `drizzle/`; compose passes every config var including `LLM_TIMEOUT_MS`; the web image type-checks and builds. Nothing found to fix by reading. The real Docker run above found two bugs.
-3. **Retention** (4.5): `snapshotRepository.deleteUneventfulBefore(cutoff, limit)` (one `DELETE … WHERE id IN (SELECT … LIMIT n)` that skips changes, first snapshots and each competitor's latest `ok`), `retention/service.ts` (`purgeExpiredSnapshots`: batches until done; an abort stops it between batches without throwing, so the rows deleted so far are still logged and the next run finishes the rest), a third job on the generic scheduler in `main.ts` (one at a time, at startup then hourly), config `SNAPSHOT_RETENTION_DAYS`, migration `0005_retention.sql` (partial index on `fetched_at` for uneventful rows; the query plan uses it plus `snapshots_last_ok_idx`). Tests (`retention/retention.test.ts`, real Postgres): mixed history purged correctly; a competitor delisted 150 days keeps its baseline and comes back as "Back on the source… Price dropped"; batching; nothing inside 90 days touched; abort. README: config row, "How history is stored", production section 3.
+3. **Retention** (4.5): `snapshotRepository.deleteUneventfulBefore(cutoff, limit)` (one `DELETE … WHERE id IN (SELECT … LIMIT n)` that skips changes, first snapshots and each competitor's latest `ok`; since Epic 5 it also skips each competitor's newest row and expires a quiet run by its `last_checked_at`), `retention/service.ts` (`purgeExpiredSnapshots`: batches until done; an abort stops it between batches without throwing, so the rows deleted so far are still logged and the next run finishes the rest), a third job on the generic scheduler in `main.ts` (one at a time, at startup then hourly), config `SNAPSHOT_RETENTION_DAYS`, migration `0005_retention.sql` (partial index on `fetched_at` for uneventful rows; the query plan uses it plus `snapshots_last_ok_idx`). Tests (`retention/retention.test.ts`, real Postgres): mixed history purged correctly; a competitor delisted 150 days keeps its baseline and comes back as "Back on the source… Price dropped"; batching; nothing inside 90 days touched; abort. README: config row, "How history is stored", production section 3.
 
 ## Verification
 - A fresh clone + following the README only → the system runs.

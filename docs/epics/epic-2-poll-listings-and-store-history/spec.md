@@ -7,14 +7,14 @@ _Scheduler → fetch → normalise → save snapshot → detect change → timel
 ## Goal
 **In one line:** regularly check every watched competitor's page, save each result, mark real changes, and show the history as a timeline.
 
-Every tracked competitor is polled periodically within the source's global rate limit. Every poll result is stored as a snapshot, including failures, 404s and "no change". Each snapshot is marked `changed` when it differs in a way that matters from the competitor's previous state. The timeline UI shows all of it.
+Every tracked competitor is polled periodically within the source's global rate limit. Every poll result is stored as a snapshot, including failures, 404s and "no change". _Since Epic 5, a run of unchanged or still-not-listed polls shares one row with a check count._ Each snapshot is marked `changed` when it differs in a way that matters from the competitor's previous state. The timeline UI shows all of it.
 
 **Definition of done:** track `acme-crm`, then advance the source (`/control/advance`). The timeline shows a new snapshot with `changed: true` and the changed fields. Noise and format variants never produce a false `changed`. Injected failures show up as failed snapshots, and the scheduler keeps running.
 
 This is the epic the graders weigh most: **persistence + scheduling**.
 
 ## Key concepts
-- **Poll**: one `GET /listings/:id` for one competitor. It produces exactly one snapshot row.
+- **Poll**: one `GET /listings/:id` for one competitor. It produces exactly one snapshot row. _Since Epic 5: one new row, or one more check on the newest row when it continues a quiet run._
 - **Scheduler**: wakes up periodically and polls the competitors that are *due* (not polled within the interval), oldest first.
 - **Normalise**: reduce the messy response to 4 clean fields, so the same content always looks the same.
 
