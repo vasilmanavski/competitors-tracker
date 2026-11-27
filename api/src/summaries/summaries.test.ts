@@ -258,6 +258,29 @@ describe("summarising", () => {
   });
 });
 
+describe("when the LLM is down", () => {
+  test("summaries pause after 5 failures in a row, so an outage costs 5 calls, then resume", async () => {
+    for (let i = 0; i < 8; i++) await trackWithTaglineChange(`competitor-${i}`);
+    let time = Date.now();
+    const service = createSummaryService({ data: services.data, llm, dailyCap: 100, log: silent, now: () => new Date(time) });
+    answers = Array.from({ length: 8 }, (): CompletionResult => ({ kind: "failed", error: "HTTP 503" }));
+
+    for (let ids = await service.claimDue(1, []); ids.length > 0; ids = await service.claimDue(1, [])) {
+      for (const id of ids) await service.summarizeSnapshot(id);
+    }
+    assert.equal(prompts.length, 5);
+    assert.equal(await llmUsageRepository.findCallsToday(), 5);
+
+    answers = [];
+    time += 5 * MINUTE_MS;
+    const trial = await service.claimDue(4, []);
+    assert.equal(trial.length, 1);
+    await service.summarizeSnapshot(trial[0]!);
+    assert.equal((await reload(Number(trial[0]))).summaryStatus, "summarized");
+    assert.equal((await service.claimDue(4, [])).length, 2);
+  });
+});
+
 describe("GET /api/competitors/:id/snapshots", () => {
   test("exposes the summary, its status, retry time and the old → new changes", async () => {
     const changed = await trackWithTaglineChange();

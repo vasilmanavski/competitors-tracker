@@ -4,6 +4,7 @@ import type { ChangedField } from "../listings/change-detection.ts";
 import { type DisplayListing, type FieldChange, toDisplayListing } from "../listings/field-changes.ts";
 import { priceOf, type Snapshot, type SummaryUpdate } from "../snapshots/repository.ts";
 import type { CompletionResult, LlmClient } from "../clients/llm/llm-client.ts";
+import { createCircuitBreaker } from "./circuit-breaker.ts";
 import { buildSummaryPrompt } from "./prompt.ts";
 import { checkSummary } from "./summary-check.ts";
 
@@ -16,6 +17,12 @@ const MINUTE_MS = 60_000;
 
 /** Waits before retrying a timed-out or failed summary; its length is the number of retries. */
 export const DEFAULT_RETRY_DELAYS_MS = [MINUTE_MS, 5 * MINUTE_MS, 15 * MINUTE_MS];
+
+/** Timeouts or errors in a row after which the LLM is treated as down. */
+const LLM_FAILURES_BEFORE_PAUSE = 5;
+
+/** How long summaries pause once the LLM looks down, before one trial call. */
+const LLM_PAUSE_MS = 5 * MINUTE_MS;
 
 /** How long a claimed snapshot stays reserved; longer than any LLM call. */
 const CLAIM_LEASE_SECONDS = 120;
@@ -51,6 +58,20 @@ function currentListingOf(snapshot: Snapshot): DisplayListing | null {
 export function createSummaryService(deps: SummaryServiceDeps) {
   const { data, llm, dailyCap, log, retryDelaysMs = DEFAULT_RETRY_DELAYS_MS, now = () => new Date() } = deps;
   const { snapshotRepository, llmUsageRepository } = data.repositories;
+  const breaker = createCircuitBreaker({ failureThreshold: LLM_FAILURES_BEFORE_PAUSE, cooldownMs: LLM_PAUSE_MS, now });
+
+  function recordLlmHealth(result: CompletionResult): void {
+    switch (result.kind) {
+      case "timeout":
+      case "failed":
+        if (breaker.recordFailure()) log.warn({ pauseMs: LLM_PAUSE_MS }, "LLM keeps failing; summaries paused");
+        return;
+      case "answer":
+      case "malformed":
+        if (breaker.recordSuccess()) log.info({}, "LLM answers again; summaries resumed");
+        return;
+    }
+  }
 
   function retryOrGiveUp(snapshot: Snapshot, status: "llm_timeout" | "llm_failed", error: string): SummaryUpdate {
     const attempts = snapshot.summaryAttempts + 1;
@@ -113,13 +134,19 @@ export function createSummaryService(deps: SummaryServiceDeps) {
       changes: changesForPrompt(snapshot),
       currentListing: currentListingOf(snapshot),
     });
-    return updateFor(snapshot, await llm.complete(prompt, signal));
+    const result = await llm.complete(prompt, signal);
+    recordLlmHealth(result);
+    return updateFor(snapshot, result);
   }
 
   return {
-    /** Claims up to `limit` snapshots whose summary is due, skipping the ones being worked on. */
+    /**
+     * Claims up to `limit` snapshots whose summary is due, skipping the ones being worked on.
+     * Claims nothing while the LLM looks down, so failed calls don't use up the daily cap.
+     */
     async claimDue(limit: number, excludeIds: string[]): Promise<string[]> {
-      const ids = await snapshotRepository.claimSummaryDue(limit, CLAIM_LEASE_SECONDS, excludeIds.map(Number));
+      const allowed = breaker.allowedCalls(limit, excludeIds.length);
+      const ids = await snapshotRepository.claimSummaryDue(allowed, CLAIM_LEASE_SECONDS, excludeIds.map(Number));
       return ids.map(String);
     },
 
