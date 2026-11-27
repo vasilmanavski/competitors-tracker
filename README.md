@@ -163,16 +163,16 @@ Next:
 - **Poll new competitors first.** A new one currently waits behind overdue ones; defaulting its `next_poll_at` to the past is a one-line fix.
 
 ### 2. 2,000 LLM calls a day
-Spend can't go over 2,000; the question is whether every change still gets a summary. The table shows what each design choice saves, starting from the naive approach.
+A poll never calls the LLM. It's called only for wording changes (tagline, description), one call per change, at most 2,000 a day:
 
-| Step | Calls/day left |
+| What a poll finds | LLM call? |
 |---|---|
-| *Naive:* summarise every poll, 6,000 × 96 (we don't) | 576,000 |
-| Only real changes: noise, price formats, partial and failed responses don't count | = real changes/day |
-| Code summaries for price, title and availability | = wording changes/day |
-| The cap; the rest waits for the next UTC day, old → new still shown | ≤ 2,000 |
+| No change (also format noise, a partial listing, a failed fetch, still a 404) | No |
+| Price, title or availability change | No: my code writes the summary |
+| Tagline or description change | Yes, one call per change |
+| Over 2,000 calls today | No: it waits until after midnight UTC, old → new shown meanwhile |
 
-**Break-even is one wording change per competitor every 3 days.** Weekly rewording is ~860 calls a day and fits; daily rewording is 6,000 and doesn't.
+So the daily spend is the number of wording changes, not the number of polls. Spend can't go over 2,000; the question is whether every change still gets a summary. **Break-even is one wording change per competitor every 3 days** (2,000 / 6,000). Weekly rewording is ~860 calls a day and fits; daily rewording is 6,000 and doesn't.
 
 Past the cap I take the **newest first**: a summary loses value as it ages, and oldest-first under steady overload would make every summary a bit later each day. The side effects are that the oldest overflow can wait forever and one competitor rewording 50 times can crowd out others. So next, in order:
 - **One summary per competitor:** three rewordings get one summary of the net change.
