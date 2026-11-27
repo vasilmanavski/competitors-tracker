@@ -146,7 +146,7 @@ describe("retention", () => {
   test("an abort stops the purge before the next batch, and a later run finishes it", async () => {
     await services.competitorService.startTracking("acme-crm");
     await record("acme-crm", 120, listing());
-    for (let day = 119; day >= 110; day--) await record("acme-crm", day, listing());
+    for (let day = 119; day >= 110; day--) await record("acme-crm", day, day % 2 === 0 ? failed : listing());
     await record("acme-crm", 1, listing());
     const controller = new AbortController();
     controller.abort();
